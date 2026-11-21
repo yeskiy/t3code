@@ -55,6 +55,8 @@ import type { MessageResolver } from "~/i18n/messages";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { FetchedToolOutput, V2ItemInspector } from "./V2ItemInspector";
 import { SubagentNotificationLink } from "./V2LifecycleRow";
+// fork: Move to background
+import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
 import {
   TimelineRowCtx,
   TimelineRowActivityCtx,
@@ -634,6 +636,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               timestampFormat={timestampFormat}
             />
           ) : null}
+          {/* fork: Move to background */}
+          <ForkMoveToBackgroundButton entry={workEntry} />
           {createdThread ? (
             <button
               type="button"

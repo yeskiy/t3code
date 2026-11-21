@@ -56,6 +56,12 @@ type WhenToken =
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
+  // fork: Ctrl+B moves the running tool call to the background; otherwise it toggles the sidebar.
+  {
+    key: "mod+b",
+    command: "toolCall.moveToBackground",
+    when: "foregroundToolRunning && !terminalFocus",
+  },
   { key: "f6", command: "workspace.focusNext" },
   { key: "shift+f6", command: "workspace.focusPrevious" },
   // Some browsers keep plain F6 for their own toolbars; mod+F6 reaches the page in all of them.

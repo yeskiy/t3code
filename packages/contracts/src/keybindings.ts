@@ -59,6 +59,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "workspace.focusNext",
   "workspace.focusPrevious",
   "sidebar.toggle",
+  // fork: Move to background for the running tool call of the focused thread.
+  "toolCall.moveToBackground",
   "navigation.back",
   "navigation.forward",
   "terminal.toggle",
