@@ -20,6 +20,7 @@ import { pathSetup, readUserLoginShell } from "@t3tools/shared/shell";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
+import { forkUserDataName } from "./ForkUserDataName.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-command");
 
@@ -90,6 +91,8 @@ export const make = Effect.gen(function* () {
   const binDirectory = path.dirname(launcher);
   const ownedPathMarker = path.join(environment.stateDir, "cli-command-path-entry");
   const firstLaunchMarker = path.join(environment.stateDir, "cli-command-first-launch");
+  // fork: an override profile never adds its t3 to the user PATH on first launch.
+  const forkProfile = (yield* forkUserDataName) !== undefined;
 
   const fail = (message: string) => new DesktopCliCommandError({ message });
   const exists = (target: string) => fs.exists(target).pipe(Effect.orElseSucceed(() => false));
@@ -418,6 +421,8 @@ export const make = Effect.gen(function* () {
 
   const installOnFirstLaunch: DesktopCliCommand["Service"]["installOnFirstLaunch"] = Effect.gen(
     function* () {
+      // fork: an override profile skips the first-launch install.
+      if (forkProfile) return;
       if (!environment.isPackaged || (yield* exists(firstLaunchMarker))) return;
       // Mark first so a failed or removed install is never retried behind the user's back.
       yield* fs.writeFileString(firstLaunchMarker, "");

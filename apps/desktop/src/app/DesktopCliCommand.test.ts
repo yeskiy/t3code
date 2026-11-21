@@ -443,4 +443,23 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect(beside.registry).toMatchObject({ path: "C:\\Tools", writes: 0 });
     }),
   );
+
+  it.effect("leaves the Windows PATH alone on first launch of a fork profile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const forkHome = yield* fs.makeTempDirectoryScoped();
+      const fork = fakePowerShell("C:\\Tools");
+      const env = { PATH: "", T3CODE_DESKTOP_USER_DATA_NAME: "t3code-fork" };
+      const command = yield* commandIn({ home: forkHome, platform: "win32", env }, fork.spawner);
+      yield* command.installOnFirstLaunch;
+      expect(fork.registry).toMatchObject({ path: "C:\\Tools", writes: 0 });
+      expect((yield* command.state).installedPath).toBeNull();
+
+      const upstreamHome = yield* fs.makeTempDirectoryScoped();
+      const upstream = fakePowerShell("C:\\Tools");
+      yield* (yield* commandIn({ home: upstreamHome, platform: "win32" }, upstream.spawner))
+        .installOnFirstLaunch;
+      expect(upstream.registry.writes).toBe(1);
+    }),
+  );
 });

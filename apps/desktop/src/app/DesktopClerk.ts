@@ -23,6 +23,8 @@ import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { openClerkTokenStorage } from "./ClerkTokenStore.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
+import { withoutProtocolRegistration } from "./ForkProtocolGuard.ts";
+import { forkUserDataName } from "./ForkUserDataName.ts";
 
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -139,10 +141,14 @@ export const make = Effect.gen(function* () {
     if (handleOpenUrl(url)) event.preventDefault();
   });
 
+  // fork: an override profile leaves the t3code:// handler to the installed app.
+  const keepProtocolHandler = (yield* forkUserDataName) !== undefined;
   yield* Effect.acquireRelease(
     Effect.try({
       try: () =>
-        createDesktopClerkBridge(environment.stateDir, environment.isDevelopment, userDataPath),
+        withoutProtocolRegistration(keepProtocolHandler, () =>
+          createDesktopClerkBridge(environment.stateDir, environment.isDevelopment, userDataPath),
+        ),
       catch: (cause) =>
         new DesktopClerkBridgeInitializationError({
           stateDir: environment.stateDir,
