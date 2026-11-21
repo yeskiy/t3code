@@ -63,6 +63,8 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
+// fork: Move to background for one tool call.
+import * as ForkToolCallControl from "../fork/ForkToolCallControl.ts";
 
 export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationEventStore.layer,
@@ -407,6 +409,10 @@ export const layer = Layer.mergeAll(
   layerProviderRuntimeRecoveryProvided,
   layerProjectionMaintenanceProvided,
   layerLegacyV1ThreadImporterProvided,
+  // fork: Move to background for one tool call.
+  ForkToolCallControl.layer.pipe(
+    Layer.provide(Layer.merge(layerOrchestratorProvided, layerProviderSessionManagerProvided)),
+  ),
 );
 
 export const layerProduction = Layer.mergeAll(

@@ -805,6 +805,11 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly taskId: string;
   }) => Effect.Effect<void, ProviderAdapterV2Error>;
+  /** Fork: moves one running foreground tool call to the background, by its turn item native id. */
+  readonly moveToolCallToBackground?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly nativeItemId: string;
+  }) => Effect.Effect<boolean, ProviderAdapterV2Error>;
   /**
    * Marks or unmarks background tasks the agent will resume from, using the ids the agent saw.
    * Ids not running on this provider thread come back unmatched and change nothing.

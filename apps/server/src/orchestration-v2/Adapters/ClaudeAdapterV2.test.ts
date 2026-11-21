@@ -6133,6 +6133,184 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  describe("moveToolCallToBackground", () => {
+    it.effect("moves one running foreground Bash call through backgroundTasks", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return toolUseId === "toolu_bash_1";
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        assert.isDefined(moveToolCallToBackground);
+        if (moveToolCallToBackground === undefined) return;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-claude-move-to-background"),
+          text: "Run the slow command in the foreground.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            uuid: "00000000-0000-4000-8000-000000038001",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: {
+              id: "msg_move_to_background_bash",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_bash_1",
+                  name: "Bash",
+                  input: { command: "sleep 1800" },
+                },
+              ],
+            },
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-move-to-background-bash",
+            tool_use_id: "toolu_bash_1",
+            description: "Slow command",
+            is_backgrounded: false,
+            task_type: "local_bash",
+            uuid: "00000000-0000-4000-8000-000000038002",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        const moved = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "toolu_bash_1",
+        });
+        assert.isTrue(moved);
+        assert.deepStrictEqual(backgroundCalls, ["toolu_bash_1"]);
+
+        const missing = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "toolu_missing",
+        });
+        assert.isFalse(missing);
+        assert.deepStrictEqual(backgroundCalls, ["toolu_bash_1", "toolu_missing"]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect("moves a foreground subagent row by its task id", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return true;
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        assert.isDefined(moveToolCallToBackground);
+        if (moveToolCallToBackground === undefined) return;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-move-subagent"),
+            text: "Audit in the foreground.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-move-subagent",
+            tool_use_id: "toolu_agent_1",
+            description: "Audit recent commits",
+            subagent_type: "general-purpose",
+            is_backgrounded: false,
+            task_type: "local_agent",
+            prompt: "Audit the last five commits.",
+            uuid: "00000000-0000-4000-8000-000000038003",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        const moved = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "task-move-subagent",
+        });
+        assert.isTrue(moved);
+        assert.deepStrictEqual(backgroundCalls, ["toolu_agent_1"]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect("fails without a live Claude query", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return true;
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        assert.isDefined(moveToolCallToBackground);
+        if (moveToolCallToBackground === undefined) return;
+        const error = yield* Effect.flip(
+          moveToolCallToBackground({
+            providerThread: harness.providerThread,
+            nativeItemId: "toolu_bash_1",
+          }),
+        );
+        assert.equal(error._tag, "ProviderAdapterProtocolError");
+        assert.deepStrictEqual(backgroundCalls, []);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+  });
+
   // regression: #23948 Claude holds a steer behind a running foreground tool
   // call and goes silent, so each steer stays pending until Claude starts it.
   it.effect("keeps a steer pending until Claude starts it", () =>

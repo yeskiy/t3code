@@ -14723,6 +14723,48 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 );
             }),
           },
+          // fork: Move to background for one foreground tool call (Bash or subagent).
+          moveToolCallToBackground: Effect.fn("ClaudeAdapterV2.moveToolCallToBackground")(
+            function* ({ providerThread, nativeItemId }) {
+              const liveQuery = yield* Ref.get(queryContext);
+              const subagents = yield* Ref.get(sessionSubagentsByTaskId);
+              // A subagent row carries its task id. A Bash row carries its tool_use id.
+              const toolUseId = subagents.get(nativeItemId)?.runToolUseId ?? nativeItemId;
+              if (
+                liveQuery === null ||
+                liveQuery.stopping ||
+                liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId ||
+                toolUseId.length === 0
+              ) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CLAUDE_PROVIDER,
+                  detail: "No live Claude query belongs to this provider thread",
+                });
+              }
+              const moved = yield* liveQuery.query.backgroundTasks(toolUseId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterProtocolError({
+                      driver: CLAUDE_PROVIDER,
+                      detail: "Background request failed",
+                      cause,
+                    }),
+                ),
+              );
+              if (moved) {
+                const taskIds = [...(yield* Ref.get(sessionSubagentsByTaskId))]
+                  .filter(
+                    ([, subagent]) =>
+                      subagent.runToolUseId === toolUseId && subagent.task.status === "running",
+                  )
+                  .map(([taskId]) => taskId);
+                yield* Ref.update(backgroundedSubagentTaskIds, (current) =>
+                  taskIds.length === 0 ? current : new Set([...current, ...taskIds]),
+                );
+              }
+              return moved;
+            },
+          ),
           stopTask: Effect.fn("ClaudeAdapterV2.stopTask")(function* ({ providerThread, taskId }) {
             const liveQuery = yield* Ref.get(queryContext);
             const task = (yield* Ref.get(sessionSubagentsByTaskId)).get(taskId);

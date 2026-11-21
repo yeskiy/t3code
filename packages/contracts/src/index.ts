@@ -75,3 +75,5 @@ export * from "./secretRequest.ts";
 export * from "./secretReference.ts";
 export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
+// fork: Move to background RPC for one tool call.
+export * from "./forkToolCall.ts";

@@ -22,6 +22,7 @@ import {
   CommandId,
   MessageId,
   ORCHESTRATION_V2_WS_METHODS,
+  FORK_TOOL_CALL_WS_METHODS,
   RunId,
   WS_METHODS,
   WsRpcGroup,
@@ -56,6 +57,12 @@ describe("RPC authorization scopes", () => {
 
   it("keeps triage, which seeds an agent that reads logs and the database, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("keeps Move to background, which changes a running turn, behind operate scope", () => {
+    expect(requiredScopeForRpcMethod(FORK_TOOL_CALL_WS_METHODS.moveToBackground)).toBe(
       AuthOrchestrationOperateScope,
     );
   });
