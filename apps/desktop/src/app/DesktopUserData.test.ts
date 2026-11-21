@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -137,4 +138,32 @@ it.effect("retries on the next launch when a GPU cache cannot be removed", () =>
 
     assert.deepStrictEqual(writes, []);
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each([
+  { name: "t3code-fork", isDevelopment: false, expected: "t3code-fork" },
+  { name: " t3code-fork-dev ", isDevelopment: true, expected: "t3code-fork-dev" },
+  { name: "t3code-v2", isDevelopment: false, expected: "t3code-v2" },
+  { name: "..\\escape", isDevelopment: false, expected: "t3code-v2" },
+  { name: "T3 Code (Alpha)", isDevelopment: false, expected: "t3code-v2" },
+  { name: "", isDevelopment: true, expected: "t3code-dev" },
+])("resolves the fork profile name $name", ({ name, isDevelopment, expected }) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-profile-" });
+    yield* fs.makeDirectory(path.join(directory, "t3code"), { recursive: true });
+    yield* fs.writeFileString(path.join(directory, "t3code", "Local State"), "{}");
+    const resolved = yield* resolveUserDataPath({
+      appDataDirectory: directory,
+      isDevelopment,
+      platform: "win32",
+    }).pipe(
+      Effect.provideService(HostProcess.Environment, { T3CODE_DESKTOP_USER_DATA_NAME: name }),
+    );
+    assert.equal(resolved, path.join(directory, expected));
+    if (expected.startsWith("t3code-fork")) {
+      assert.isFalse(yield* fs.exists(path.join(resolved, "Local State")));
+    }
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
