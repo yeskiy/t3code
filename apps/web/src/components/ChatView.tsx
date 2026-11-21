@@ -63,6 +63,11 @@ import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./cha
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
 import { useWorktreeSetup } from "./chat/useWorktreeSetup";
 import { useChatShortcuts } from "./chat/useChatShortcuts";
+// fork: Move to background
+import {
+  useForkForegroundToolTracker,
+  useForkMoveToBackgroundShortcut,
+} from "~/fork/toolCallBackground/useForkForegroundToolTracker";
 import { ChatBannerLane } from "./chat/ChatBannerLane";
 import * as Schema from "effect/Schema";
 import {
@@ -2856,6 +2861,15 @@ export default function ChatView(props: ChatViewProps) {
     }
   });
 
+  // fork: Move to background tracks the focused thread's running tool call for Ctrl+B.
+  useForkForegroundToolTracker({
+    environmentId,
+    threadId,
+    entries: timelineEntries,
+    runLive: isWorking,
+    focused: activeThreadId !== null && !embedded && !backgroundThread && canOperateThread,
+  });
+  const forkMoveToBackground = useForkMoveToBackgroundShortcut(); // fork: Move to background
   useChatShortcuts({
     enabled: activeThreadId !== null && !backgroundThread,
     embedded,
@@ -2902,6 +2916,8 @@ export default function ChatView(props: ChatViewProps) {
         if (!canInterruptRunningThread) return false;
         if (!event.repeat) void onInterruptStable();
       },
+      // fork: Ctrl+B Move to background
+      "toolCall.moveToBackground": ({ event }) => forkMoveToBackground(event),
     },
     fallback: (command) => {
       const scriptId = projectScriptIdFromCommand(command);

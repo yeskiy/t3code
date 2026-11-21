@@ -6,11 +6,15 @@ import {
 } from "@t3tools/shared/keybindings";
 
 import {
+  EnvironmentId,
   type KeybindingCommand,
   type KeybindingShortcut,
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
+  ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
+import { setForkMoveTarget } from "./fork/toolCallBackground/foregroundToolContext";
 import {
   effectiveShortcutsForCommand,
   formatShortcutLabel,
@@ -837,6 +841,50 @@ describe("isSidebarToggleShortcut", () => {
         platform: "MacIntel",
         context: { terminalFocus: true },
       }),
+    );
+  });
+});
+
+describe("Move to background shortcut", () => {
+  const ctrlB = event({ key: "b", ctrlKey: true });
+
+  it.each([
+    { context: { foregroundToolRunning: true }, expected: "toolCall.moveToBackground" },
+    { context: { foregroundToolRunning: false }, expected: "sidebar.toggle" },
+    { context: { foregroundToolRunning: true, terminalFocus: true }, expected: "sidebar.toggle" },
+  ] as const)("resolves Ctrl+B with $context to $expected", ({ context, expected }) => {
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Win32", context }),
+      expected,
+    );
+  });
+
+  it("keeps the sidebar from toggling while a tool call can move", () => {
+    assert.isFalse(
+      isSidebarToggleShortcut(ctrlB, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+    );
+  });
+
+  it("reads the running tool call of the focused thread from the fork store", () => {
+    setForkMoveTarget({
+      environmentId: EnvironmentId.make("environment"),
+      threadId: ThreadId.make("thread"),
+      itemId: TurnItemId.make("item"),
+    });
+    try {
+      assert.strictEqual(
+        resolveShortcutCommand(ctrlB, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Win32" }),
+        "toolCall.moveToBackground",
+      );
+    } finally {
+      setForkMoveTarget(null);
+    }
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Win32" }),
+      "sidebar.toggle",
     );
   });
 });

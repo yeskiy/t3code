@@ -21,6 +21,8 @@ import {
 import { isElectron } from "./env";
 import { isEditableFocused } from "./lib/editableFocus";
 import { projectScriptIdFromCommand } from "./projectScripts";
+// fork: Move to background shortcut context.
+import { readForkShortcutContext } from "./fork/toolCallBackground/foregroundToolContext";
 
 export type { ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
 export { shortcutKeyFromEvent } from "@t3tools/shared/keybindings";
@@ -67,6 +69,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     isWeb: !isElectron,
     isDesktop: isElectron,
     editableFocus: false,
+    ...readForkShortcutContext(), // fork: foregroundToolRunning for Move to background
     ...options?.context,
   };
 }
