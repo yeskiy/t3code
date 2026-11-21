@@ -7,8 +7,9 @@ import {
 } from "~/hooks/useLocalStorage";
 import { FORK_SHARP_TEXT_KEY, ForkSharpTextStored, resolveForkSharpText } from "./sharpText.logic";
 
+// A stub document without a root element (in tests) leaves the flag unset.
 const applyForkSharpText = () =>
-  document.documentElement.toggleAttribute(
+  document.documentElement?.toggleAttribute(
     "data-fork-sharp-text",
     resolveForkSharpText(
       readLocalStorageValue(FORK_SHARP_TEXT_KEY, null, ForkSharpTextStored),
