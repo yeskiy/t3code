@@ -37,6 +37,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
+import { ForkSharpTextRow } from "~/fork/sharpText/ForkSharpTextRow"; // fork: sharp text row
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: msg("Artwork"),
@@ -261,6 +262,8 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        {/* fork: sharp text row */}
+        <ForkSharpTextRow />
 
         <SettingsRow
           {...searchableSetting("chat-width")}

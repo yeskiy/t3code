@@ -1,0 +1,50 @@
+/* Fork sharp text: opaque surfaces and no backdrop filters, masks, or grain,
+   so Chromium keeps LCD (ClearType) text. Rounded corners stay. */
+html[data-fork-sharp-text] {
+  --glass-opacity: 100% !important;
+  --glass-blur: 0px !important;
+  --surface-grain: none !important;
+}
+
+html[data-fork-sharp-text] *,
+html[data-fork-sharp-text] *::before,
+html[data-fork-sharp-text] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-fork-sharp-text] [data-slot="scroll-area-viewport"],
+html[data-fork-sharp-text] .topbar-scroll-fade,
+html[data-fork-sharp-text] .virtualized-scroll-fade,
+html[data-fork-sharp-text] [data-thread-details-card] * {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
+/* --- Opaque scroll layers: a scroller with a transparent background loses LCD text --- */
+html[data-fork-sharp-text] [data-slot="sidebar"] [data-slot="scroll-area-viewport"] {
+  background-color: var(--sidebar);
+}
+
+html[data-fork-sharp-text] .messages-timeline-scroll,
+html[data-fork-sharp-text] .chat-markdown-table-container [data-slot="scroll-area-viewport"] {
+  background-color: var(--background);
+}
+
+:where(html[data-fork-sharp-text] [data-timeline-row-kind]) {
+  background-color: var(--background);
+}
+
+html[data-fork-sharp-text] [data-thread-details-card] [data-slot="scroll-area-viewport"] {
+  background-color: var(--popover);
+}
+
+/* --- Composer: opaque host, and no will-change layers over the text --- */
+html[data-fork-sharp-text] [data-slot="composer-host"] {
+  background-color: var(--chat-composer-glass-surface);
+}
+
+html[data-fork-sharp-text] [data-chat-composer-form] *,
+html[data-fork-sharp-text] [data-thread-details-card] * {
+  will-change: auto !important;
+}
