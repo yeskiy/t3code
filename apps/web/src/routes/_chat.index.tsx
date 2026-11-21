@@ -21,6 +21,7 @@ import {
   useVisibleThreadShells,
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
+import { ForkIndexLanding } from "../fork/newThreadDefault/ForkIndexLanding";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -31,7 +32,8 @@ function ChatIndexRouteView() {
     if (environments.length === 0) return <HostedEmptyState />;
   }
 
-  return <IndexDraftLanding />;
+  // fork: the "New threads open in" setting picks No project or the upstream landing.
+  return <ForkIndexLanding upstream={<IndexDraftLanding />} />;
 }
 
 function IndexDraftLanding() {

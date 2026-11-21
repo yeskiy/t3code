@@ -33,6 +33,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { type CommandHandler, registerCommands } from "./dispatcher";
+import { startForkScratchThread } from "../fork/newThreadDefault/forkNewThreadDefault";
 
 const CHAT_ROUTE_ID = "/_chat";
 
@@ -149,6 +150,8 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         void scratch.startScratchThread(environmentId);
       },
       "chat.new": (event) => {
+        // fork: "New threads open in: No project" skips the project picker.
+        if (startForkScratchThread(scratch, null, () => claim(event))) return;
         const groups = readProjectGroups();
         if (
           !shouldCreateNewThreadInCurrentProject(

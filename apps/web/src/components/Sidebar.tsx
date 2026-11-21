@@ -130,6 +130,8 @@ import {
   useThreadActions,
 } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useScratchProject } from "../hooks/useScratchProject";
+import { startForkScratchThread } from "../fork/newThreadDefault/forkNewThreadDefault";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
@@ -995,6 +997,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
+  // fork: No project actions for the "New threads open in" setting.
+  const forkScratch = useScratchProject();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -2999,6 +3003,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       void handleNewThread(scopedProjectRef);
       return;
     }
+    // fork: a plain click opens No project. Shift-click keeps the current project.
+    if (
+      !event?.shiftKey &&
+      startForkScratchThread(forkScratch, null, () => isMobile && setOpenMobile(false))
+    )
+      return;
     if (
       shouldCreateNewThreadInCurrentProject(
         event?.shiftKey ?? false,

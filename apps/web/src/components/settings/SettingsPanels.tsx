@@ -89,6 +89,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { ForkNewThreadDefaultRow } from "../../fork/newThreadDefault/ForkNewThreadDefaultRow";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -969,6 +970,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        {/* fork: "New threads open in" row */}
+        <ForkNewThreadDefaultRow />
       </SettingsSection>
 
       <SettingsSection id="confirmations" title={gt("Confirmations")}>
