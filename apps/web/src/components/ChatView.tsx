@@ -68,6 +68,8 @@ import {
   useForkForegroundToolTracker,
   useForkMoveToBackgroundShortcut,
 } from "~/fork/toolCallBackground/useForkForegroundToolTracker";
+// fork: artifacts panel
+import { useForkArtifactsEnabled } from "~/fork/artifacts/forkArtifactsSetting";
 import { ChatBannerLane } from "./chat/ChatBannerLane";
 import * as Schema from "effect/Schema";
 import {
@@ -2489,6 +2491,7 @@ export default function ChatView(props: ChatViewProps) {
     addFilesSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
+    addArtifactsSurfaceStable, // fork: artifacts panel
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,
@@ -2530,6 +2533,7 @@ export default function ChatView(props: ChatViewProps) {
     closeRightPanelSurface,
   });
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
+  const [forkArtifactsEnabled] = useForkArtifactsEnabled(); // fork: artifacts panel
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
@@ -4203,6 +4207,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
+          onAddArtifacts={forkArtifactsEnabled ? addArtifactsSurfaceStable : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && diffAvailable}
@@ -4212,6 +4217,7 @@ export default function ChatView(props: ChatViewProps) {
           deviceAvailable={activeThreadRef !== null}
           sideChatAvailable={sideChat.available}
           sideChatDisabledReason={sideChatDisabledReason}
+          artifactsAvailable={forkArtifactsEnabled && isServerThread}
         >
           {rightPanelContent}
         </ChatRightPanel>

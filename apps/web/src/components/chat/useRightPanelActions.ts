@@ -162,6 +162,12 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     useRightPanelStore.getState().open(activeThreadRef, "pull-requests");
   };
   const addPullRequestsSurfaceStable = useStableCallback(addPullRequestsSurface);
+  // fork: artifacts panel
+  const addArtifactsSurface = () => {
+    if (!activeThreadRef || !isServerThread) return;
+    useRightPanelStore.getState().open(activeThreadRef, "artifacts");
+  };
+  const addArtifactsSurfaceStable = useStableCallback(addArtifactsSurface);
   const addDeviceSurface = () => {
     if (!activeThreadRef) return;
     if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
@@ -352,6 +358,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     addFilesSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
+    addArtifactsSurfaceStable, // fork: artifacts panel
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,

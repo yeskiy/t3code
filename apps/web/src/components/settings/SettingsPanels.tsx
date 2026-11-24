@@ -90,6 +90,7 @@ import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { ForkNewThreadDefaultRow } from "../../fork/newThreadDefault/ForkNewThreadDefaultRow";
+import { ForkArtifactsSettingRow } from "../../fork/artifacts/ForkArtifactsSettingRow"; // fork: artifacts panel
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -1212,6 +1213,8 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+        {/* fork: "Show renders as artifacts" row */}
+        <ForkArtifactsSettingRow />
       </SettingsSection>
     </SettingsPageContainer>
   );
