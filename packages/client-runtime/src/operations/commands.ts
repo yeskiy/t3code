@@ -217,6 +217,8 @@ export interface InterruptThreadTurnInput extends ThreadCommandInput {
   readonly runId?: RunId;
   readonly subagentId?: NodeId;
   readonly turnId?: string;
+  // fork: turn ends only a running turn and leaves background work running.
+  readonly scope?: "turn";
 }
 
 export interface RespondToThreadApprovalInput extends ThreadCommandInput {
@@ -945,6 +947,8 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
         type: "thread.stop",
         commandId: yield* allocateCommandId(input),
         threadId,
+        // fork: turn-scoped Stop ends only a running turn.
+        ...(input.scope === undefined ? {} : { scope: input.scope }),
       });
     }
   }
@@ -995,6 +999,8 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
     threadId,
     runId,
     holdQueue: true,
+    // fork: turn-scoped Stop ends only a running turn.
+    ...(input.scope === undefined ? {} : { scope: input.scope }),
   });
 });
 

@@ -221,6 +221,7 @@ import {
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ForkStopScope from "../fork/ForkStopScope.ts"; // fork: turn-scoped Stop
 import * as ServerSettings from "../serverSettings.ts";
 
 const isMessageQuestionAnswer = Schema.is(
@@ -12852,6 +12853,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     >;
     readonly stoppedProviderThreadId: OrchestrationV2ProviderThread["id"] | null;
     readonly throughRunOrdinal: number;
+    readonly keepDelegatedTasks?: boolean; // fork: turn-scoped Stop keeps delegated tasks
     readonly now: DateTime.Utc;
   }) {
     const emitEvent = emit(input.events, input.command);
@@ -12896,6 +12898,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     })) {
       const itemRunOrdinal = item.runId === null ? undefined : runOrdinals.get(item.runId);
       if (itemRunOrdinal !== undefined && itemRunOrdinal > input.throughRunOrdinal) continue;
+      // fork: turn-scoped Stop keeps app-owned delegated tasks on the Waiting strip.
+      if (
+        input.keepDelegatedTasks === true &&
+        item.type === "subagent" &&
+        item.origin === "app_owned"
+      ) {
+        continue;
+      }
       const providerThreadId = item.providerThreadId ?? null;
       if (
         providerThreadId !== null &&
@@ -13005,6 +13015,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly providerTurn: OrchestrationV2ProviderTurn;
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
+    readonly keepBackgroundWork?: boolean; // fork: turn-scoped Stop keeps provider subagents
     readonly now: DateTime.Utc;
   }) {
     const attempt = input.projection.attempts.find(
@@ -13071,9 +13082,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         payload: { ...message, streaming: false, updatedAt: input.now },
       });
     }
-    const delegatedNodeIds = new Set(
+    // fork: turn-scoped Stop keeps provider subagents alongside app-owned tasks.
+    const keptNodeIds = new Set(
       input.projection.subagents
-        .filter((subagent) => subagent.origin === "app_owned")
+        .filter((subagent) => subagent.origin === "app_owned" || input.keepBackgroundWork === true)
         .map((subagent) => subagent.id),
     );
     // Callers load only tool and message items; the request cards close with the requests below.
@@ -13096,12 +13108,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       open: {
         subagents: new Map(
           input.projection.subagents
-            .filter((task) => task.runId === run.id && task.origin !== "app_owned")
+            .filter((task) => task.runId === run.id && !keptNodeIds.has(task.id))
             .map((task) => [task.id, task]),
         ),
         nodes: new Map(
           input.projection.nodes
-            .filter((node) => node.runId === run.id && !delegatedNodeIds.has(node.id))
+            .filter((node) => node.runId === run.id && !keptNodeIds.has(node.id))
             .map((node) => [node.id, node]),
         ),
         turnItems: new Map(),
@@ -13249,6 +13261,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "subagents">;
     readonly cohortRunIds: ReadonlyArray<RunId>;
+    readonly keepBackgroundWork?: boolean; // fork: turn-scoped Stop keeps watches and delegated wakes
     readonly now: DateTime.Utc;
   }) {
     const emitEvent = emit(input.events, input.command);
@@ -13344,6 +13357,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         payload: { ...run, queueHeld: true },
       });
     }
+    // fork: turn-scoped Stop holds queued turns without ending watches or delegated wakes.
+    if (input.keepBackgroundWork === true) return;
     const pullRequests = thread.pullRequests ?? [];
     if (pullRequests.some((link) => link.watch !== undefined)) {
       yield* emitEvent({
@@ -13542,6 +13557,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       )
         return;
       const now = yield* DateTime.now;
+      // fork: turn-scoped Stop preserves provider work only while its live session still runs it.
+      const keepBackgroundWork = yield* ForkStopScope.shouldPreserveProviderBackgroundWork({
+        scope: command.scope,
+        providerThread: projection.providerThreads.find(
+          (candidate) => candidate.id === command.providerThreadId,
+        ),
+        getSession: (sessionId) => providerSessions.get(sessionId),
+      });
       if (stopped.providerTurn !== undefined && stoppedRun.status === "running") {
         const output = yield* projectionStore
           .getThreadRecords(command.threadId, ["messages"], {
@@ -13555,9 +13578,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           providerTurn: stopped.providerTurn,
           events,
           effects,
+          ...(keepBackgroundWork ? { keepBackgroundWork: true } : {}),
           now,
         });
       }
+      if (keepBackgroundWork) return;
       // A new turn may have started since Stop; its work is not this Stop's.
       if (
         projection.runs.some(
@@ -13574,6 +13599,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection,
         stoppedProviderThreadId: command.providerThreadId,
         throughRunOrdinal: stoppedRun.ordinal,
+        ...(command.scope === "turn" ? { keepDelegatedTasks: true } : {}),
         now,
       });
     },
@@ -13702,6 +13728,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "run.interrupt" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    options?: { readonly stopsDelegatedTasks?: boolean }, // fork: turn-scoped Stop
   ) {
     const projection = yield* loadProjectionForCommand(
       command,
@@ -13774,6 +13801,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (candidate) => candidate.id === run.userMessageId,
     );
     const completionCohortRunId = completionMessage?.delegatedCompletion?.parentRunId ?? run.id;
+    // fork: turn-scoped Stop keeps watches, delegated tasks, and provider background work on active runs.
+    const keepBackgroundWork = ForkStopScope.runCanKeepBackgroundWork(run, command.scope);
     const stopRemainingWork = () =>
       command.holdQueue === true
         ? holdStoppedThread({
@@ -13781,23 +13810,30 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             events,
             projection,
             cohortRunIds: [completionCohortRunId],
+            keepBackgroundWork,
             now,
           })
-        : Effect.gen(function* () {
-            for (const parentRunId of new Set([completionCohortRunId, run.id])) {
-              yield* disposeDelegatedCompletionCohort({
-                command,
-                events,
-                projection: yield* getProjectionWithPendingEvents(command.threadId, events),
-                parentRunId,
-                disposition: "stopped",
-                now,
-                ...(parentRunId !== run.id && completionMessage?.delegatedCompletion !== undefined
-                  ? { interruptedWakeTaskIds: completionMessage.delegatedCompletion.taskIds }
-                  : {}),
-              });
-            }
-          });
+        : keepBackgroundWork
+          ? Effect.void
+          : Effect.gen(function* () {
+              for (const parentRunId of new Set([completionCohortRunId, run.id])) {
+                yield* disposeDelegatedCompletionCohort({
+                  command,
+                  events,
+                  projection: yield* getProjectionWithPendingEvents(command.threadId, events),
+                  parentRunId,
+                  disposition: "stopped",
+                  now,
+                  ...(parentRunId !== run.id && completionMessage?.delegatedCompletion !== undefined
+                    ? { interruptedWakeTaskIds: completionMessage.delegatedCompletion.taskIds }
+                    : {}),
+                });
+              }
+            });
+    const delegatedTasksStop: ReadonlyArray<PendingOrchestrationEffectV2> =
+      options?.stopsDelegatedTasks === true && !keepBackgroundWork
+        ? [delegatedTasksStopEffect(command)]
+        : [];
 
     const emitEvent = emit(events, command);
     const interruptRequestItem: OrchestrationV2TurnItem = {
@@ -13823,7 +13859,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     };
 
     const otherProviderInterrupts: Array<PendingOrchestrationEffectV2> = [];
-    if (hasBackgroundWork || command.holdQueue === true) {
+    // fork: turn-scoped Stop leaves background work on other provider threads running.
+    if (!keepBackgroundWork && (hasBackgroundWork || command.holdQueue === true)) {
       const runOrdinals = new Map(
         projection.runs.map((candidate) => [candidate.id, candidate.ordinal]),
       );
@@ -14018,7 +14055,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
       yield* stopRemainingWork();
-      yield* Ref.update(effects, (existing) => [...existing, ...otherProviderInterrupts]);
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        ...otherProviderInterrupts,
+        ...delegatedTasksStop,
+      ]);
       return {
         effectTypes: ["provider-turn.start", "provider-turn.restart"],
         reason: `Run ${run.id} was interrupted before its provider turn started.`,
@@ -14066,9 +14107,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection,
         stoppedProviderThreadId: providerThread.id,
         throughRunOrdinal: run.ordinal,
+        keepDelegatedTasks: keepBackgroundWork, // fork: turn-scoped Stop
         now,
       });
-      yield* Ref.update(effects, (existing) => [...existing, ...otherProviderInterrupts]);
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        ...otherProviderInterrupts,
+        ...delegatedTasksStop,
+      ]);
       return undefined;
     }
     if (providerThread.providerSessionId === null) {
@@ -14109,9 +14155,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           providerSessionId,
           providerThreadId: providerThread.id,
           providerTurnId: providerTurn.id,
+          ...(keepBackgroundWork ? { scope: "turn" as const } : {}), // fork: turn-scoped Stop
         },
       } satisfies PendingOrchestrationEffectV2,
       ...otherProviderInterrupts,
+      ...delegatedTasksStop,
     ]);
     return undefined;
   });
@@ -14361,6 +14409,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? latestRun
         : undefined);
     if (target !== undefined) {
+      // fork: turn-scoped Stop ends only an active run and leaves delegated tasks running.
+      const keepBackgroundWork = ForkStopScope.runCanKeepBackgroundWork(target, command.scope);
       const interruptEvents = yield* Ref.make<Array<OrchestrationV2DomainEvent>>([]);
       const interruptEffects = yield* Ref.make<Array<PendingOrchestrationEffectV2>>([]);
       const interrupted = yield* Effect.exit(
@@ -14372,6 +14422,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             runId: target.id,
             holdQueue: true,
             ...(command.reason === undefined ? {} : { reason: command.reason }),
+            ...(command.scope === undefined ? {} : { scope: command.scope }),
           },
           interruptEvents,
           interruptEffects,
@@ -14383,8 +14434,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const enqueued = yield* Ref.get(interruptEffects);
         yield* Ref.update(events, (existing) => [...existing, ...written]);
         yield* Ref.update(effects, (existing) => [...existing, ...enqueued]);
-        yield* cancelIdleOrphans({ command, events, projection });
-        yield* stopDelegatedTasks;
+        if (!keepBackgroundWork) {
+          yield* cancelIdleOrphans({ command, events, projection });
+          yield* stopDelegatedTasks;
+        }
         return interrupted.value;
       }
       yield* Effect.logWarning("thread.stop could not interrupt the running turn", {
@@ -15891,8 +15944,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* dispatchSubagentStop(command, events, effects);
         break;
       case "run.interrupt":
-        cancelUnsettledEffects = yield* dispatchRunInterrupt(command, events, effects);
-        if (command.holdQueue === true) {
+        // fork: dispatchRunInterrupt decides whether to stop delegated tasks based on scope.
+        cancelUnsettledEffects = yield* dispatchRunInterrupt(command, events, effects, {
+          stopsDelegatedTasks: command.holdQueue === true,
+        });
+        if (
+          command.holdQueue === true &&
+          (yield* Ref.get(effects)).some((effect) => effect.request.type === "delegated-tasks.stop")
+        ) {
           // Stop must still commit when a child can't be read, so a failed repair's
           // partial events are dropped.
           const repairEvents = yield* Ref.make(yield* Ref.get(events));
@@ -15912,10 +15971,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               threadId: command.threadId,
               cause: repaired.cause,
             });
-          yield* Ref.update(effects, (existing) => [
-            ...existing,
-            delegatedTasksStopEffect(command),
-          ]);
         }
         break;
       case "thread.stop":

@@ -66,6 +66,8 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     providerThreadId: ProviderThreadId,
     providerTurnId: ProviderTurnId,
     subagent: Schema.optional(Schema.Struct({ id: NodeId, nativeTaskId: Schema.String })),
+    // fork: turn-scoped Stop keeps delegated tasks and live provider background work.
+    scope: Schema.optional(Schema.Literal("turn")),
   }),
   Schema.Struct({
     type: Schema.Literal("provider-turn.steer"),

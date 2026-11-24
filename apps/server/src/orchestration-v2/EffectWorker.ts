@@ -249,6 +249,7 @@ export const layerExecutor: Layer.Layer<
             );
           case "provider-turn.interrupt": {
             const request = effect.request;
+            const scope = request.scope; // fork: turn-scoped Stop
             return providerTurnControl
               .interrupt({
                 threadId: effect.threadId,
@@ -263,6 +264,7 @@ export const layerExecutor: Layer.Layer<
                         requestedAt: DateTime.makeUnsafe(effect.createdAt),
                       },
                     }),
+                ...(scope === undefined ? {} : { scope }), // fork: turn-scoped Stop
               })
               .pipe(
                 Effect.tapError((cause) =>
@@ -315,6 +317,7 @@ export const layerExecutor: Layer.Layer<
                           threadId: effect.threadId,
                           providerThreadId: request.providerThreadId,
                           providerTurnId: request.providerTurnId,
+                          ...(scope === undefined ? {} : { scope }), // fork: turn-scoped Stop
                         }),
                 ),
                 Effect.mapError(
