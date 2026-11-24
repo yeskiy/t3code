@@ -1332,6 +1332,14 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
   options?: {
     readonly profileDirectory?: string;
     readonly initialToolCalls?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+    // fork: test helpers for post-settle hold wake coverage.
+    readonly disableWakePrompt?: boolean;
+    readonly onFollowUpPrompt?: (
+      promptNumber: number,
+      send: (
+        update: EffectAcpSchema.SessionUpdate,
+      ) => Effect.Effect<void, EffectAcpErrors.AcpError>,
+    ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   },
 ) {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -1409,6 +1417,10 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
               }
               if (prompts.length > 1) {
                 yield* Deferred.succeed(steered, undefined);
+                if (options?.onFollowUpPrompt !== undefined) {
+                  yield* options.onFollowUpPrompt(prompts.length, send);
+                  return { stopReason: "end_turn" as const };
+                }
                 yield* Deferred.await(releaseSteer);
                 return { stopReason: "end_turn" as const };
               }
@@ -1445,18 +1457,29 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
     defaultModel: Effect.undefined,
     ...(profileDirectory === undefined ? {} : { profileDirectory }),
   };
+  const baseFlavor = makeAntigravityAcpAdapterFlavor({
+    ...adapterOptions,
+    random: crypto,
+    fileSystem: yield* FileSystem.FileSystem,
+    path,
+    host: yield* ProviderHost.ProviderHost,
+  });
+  const testFlavor =
+    options?.disableWakePrompt === true && baseFlavor.postSettleCommandHold !== undefined
+      ? {
+          ...baseFlavor,
+          postSettleCommandHold: {
+            timeout: baseFlavor.postSettleCommandHold.timeout,
+            isCommand: baseFlavor.postSettleCommandHold.isCommand,
+          },
+        }
+      : baseFlavor;
   const adapter =
     options === undefined
       ? yield* makeAntigravityAdapterV2(adapterOptions)
       : yield* makeAcpAdapterV2({
           instanceId,
-          flavor: makeAntigravityAcpAdapterFlavor({
-            ...adapterOptions,
-            random: crypto,
-            fileSystem: yield* FileSystem.FileSystem,
-            path,
-            host: yield* ProviderHost.ProviderHost,
-          }),
+          flavor: testFlavor,
           selfInvocation,
           ...(adapterOptions.continuationRequests === undefined
             ? {}
@@ -1687,28 +1710,109 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
     }).pipe(Effect.provide(layerSession)),
   );
 
-  // A command whose terminal update never arrives would hold the run in Working forever with
-  // an empty pending list and a finished reply above Stop.
-  it.effect("settles a silent background command after the post-settle hold timeout", () =>
+  // fork: Antigravity wakes once on the first hold expiry and finalizes on a second expiry.
+  it.effect(
+    "wakes a silent background command once on first hold expiry and finalizes on second expiry",
+    () =>
+      Effect.gen(function* () {
+        const opened = yield* openSessionWithRunningCommand(
+          { WaitMsBeforeAsync: 10000 },
+          undefined,
+          undefined,
+          {
+            onFollowUpPrompt: (_promptNumber, sendUpdate) =>
+              Effect.gen(function* () {
+                yield* sendUpdate({
+                  sessionUpdate: "agent_message_chunk",
+                  content: {
+                    type: "text",
+                    text: "Build finished; node fetch_throughput.mjs still runs.",
+                  },
+                });
+                yield* sendUpdate({ sessionUpdate: "usage_update", used: 9500, size: 1048576 });
+              }),
+          },
+        );
+        const { command, offers, prompts, startTurn, until, throughPromptSettled } = opened;
+        yield* startTurn(1, false);
+        const prompt = yield* throughPromptSettled;
+
+        yield* TestClock.adjust("20 minutes");
+        assert.lengthOf(prompts, 1, "must not wake before the 30-minute hold expires");
+
+        yield* TestClock.adjust("11 minutes");
+        const wakeReply = yield* until(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "assistant_message" &&
+            event.turnItem.status === "completed",
+        );
+        assert.lengthOf(prompts, 2, "first expiry sends one wake prompt");
+        assert.deepEqual(prompts[1]!.prompt, [
+          {
+            type: "text",
+            text: "A background command you started (node fetch_throughput.mjs) has had no update for 30 minutes. Report now: what finished, what still runs, and how to check it later. Do not start another long command.",
+          },
+        ]);
+        assert.include(
+          JSON.stringify(wakeReply),
+          "Build finished; node fetch_throughput.mjs still runs.",
+        );
+
+        // Command is still running, so a second 30-minute silence finalizes without waking again.
+        yield* TestClock.adjust("20 minutes");
+        assert.lengthOf(prompts, 2, "must not wake a second time before the second expiry");
+        yield* TestClock.adjust("11 minutes");
+        const run = yield* until((event) => event.type === "turn.terminal");
+        const terminal = run.at(-1);
+        assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
+        assert.equal(terminal?.type === "turn.terminal" && terminal.failure, null);
+        assert.lengthOf(prompts, 2, "never wakes more than once per turn");
+        assert.lengthOf(offers, 0);
+        const commandItem = [...prompt, ...wakeReply, ...run].findLast(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.nativeItemRef?.nativeId === command.toolCallId,
+        );
+        assert.isTrue(
+          commandItem?.type === "turn_item.updated" && commandItem.turnItem.status === "completed",
+          "the silent command is no longer left as live activity on a settled run",
+        );
+      }).pipe(Effect.provide(layerSession)),
+  );
+
+  // fork: when the wake reply finishes the command, normal finalize runs immediately.
+  it.effect("finalizes normally when the hold-expiry wake reply finishes the command", () =>
     Effect.gen(function* () {
-      const { command, offers, startTurn, until, throughPromptSettled } =
-        yield* openSessionWithRunningCommand({ WaitMsBeforeAsync: 10000 });
+      const { command, offers, prompts, startTurn, until, throughPromptSettled } =
+        yield* openSessionWithRunningCommand({ WaitMsBeforeAsync: 10000 }, undefined, undefined, {
+          onFollowUpPrompt: (_promptNumber, sendUpdate) =>
+            Effect.gen(function* () {
+              yield* sendUpdate({
+                sessionUpdate: "tool_call_update",
+                toolCallId: "call_fetch",
+                kind: "execute",
+                title: "node fetch_throughput.mjs",
+                status: "completed",
+                rawOutput: { output: "done", exit_code: 0 },
+              });
+              yield* sendUpdate({
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Command finished cleanly." },
+              });
+              yield* sendUpdate({ sessionUpdate: "usage_update", used: 9500, size: 1048576 });
+            }),
+        });
       yield* startTurn(1, false);
       const prompt = yield* throughPromptSettled;
 
-      // A running tool keeps the inactivity watchdog re-armed, so 20 silent minutes do not
-      // settle this run on their own.
-      yield* TestClock.adjust("20 minutes");
-      yield* TestClock.adjust("11 minutes");
+      yield* TestClock.adjust("31 minutes");
       const run = yield* until((event) => event.type === "turn.terminal");
       const terminal = run.at(-1);
-      assert.equal(
-        terminal?.type === "turn.terminal" && terminal.status,
-        "completed",
-        "the bounded hold finalizes the turn instead of leaving it running forever",
-      );
-      assert.equal(terminal?.type === "turn.terminal" && terminal.failure, null);
-      assert.lengthOf(offers, 0, "a silent command produces no wake on its own");
+      assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
+      assert.lengthOf(prompts, 2);
+      assert.include(JSON.stringify(run), "Command finished cleanly.");
+      assert.lengthOf(offers, 0);
       const commandItem = [...prompt, ...run].findLast(
         (event) =>
           event.type === "turn_item.updated" &&
@@ -1716,8 +1820,137 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
       );
       assert.isTrue(
         commandItem?.type === "turn_item.updated" && commandItem.turnItem.status === "completed",
-        "the silent command is no longer left as live activity on a settled run",
       );
+    }).pipe(Effect.provide(layerSession)),
+  );
+
+  // fork: flavors without wakePrompt keep upstream first-expiry finalization.
+  it.effect("settles a silent background command on first expiry when wakePrompt is omitted", () =>
+    Effect.gen(function* () {
+      const { command, offers, prompts, startTurn, until, throughPromptSettled } =
+        yield* openSessionWithRunningCommand({ WaitMsBeforeAsync: 10000 }, undefined, undefined, {
+          disableWakePrompt: true,
+        });
+      yield* startTurn(1, false);
+      const prompt = yield* throughPromptSettled;
+
+      yield* TestClock.adjust("20 minutes");
+      yield* TestClock.adjust("11 minutes");
+      const run = yield* until((event) => event.type === "turn.terminal");
+      const terminal = run.at(-1);
+      assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
+      assert.equal(terminal?.type === "turn.terminal" && terminal.failure, null);
+      assert.lengthOf(prompts, 1, "flavors without wakePrompt send no wake prompt");
+      assert.lengthOf(offers, 0);
+      const commandItem = [...prompt, ...run].findLast(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.nativeItemRef?.nativeId === command.toolCallId,
+      );
+      assert.isTrue(
+        commandItem?.type === "turn_item.updated" && commandItem.turnItem.status === "completed",
+      );
+    }).pipe(Effect.provide(layerSession)),
+  );
+
+  // fork: a user steer during the hold wait retires the old hold loop and keeps the single wake.
+  it.effect("resets the command hold wait on user steer without losing the one-shot wake", () =>
+    Effect.gen(function* () {
+      const opened = yield* openSessionWithRunningCommand(
+        { WaitMsBeforeAsync: 10000 },
+        undefined,
+        { agentVersion: "1.5.11", holdsFirstPrompt: false },
+        {
+          onFollowUpPrompt: (promptNumber, sendUpdate) =>
+            Effect.gen(function* () {
+              if (promptNumber === 3) {
+                yield* sendUpdate({
+                  sessionUpdate: "tool_call_update",
+                  toolCallId: "call_fetch",
+                  kind: "execute",
+                  title: "node fetch_throughput.mjs",
+                  status: "completed",
+                  rawOutput: { output: "done", exit_code: 0 },
+                });
+              }
+              yield* sendUpdate({
+                sessionUpdate: "agent_message_chunk",
+                content: {
+                  type: "text",
+                  text: promptNumber === 2 ? "Still running." : "Reported after wake.",
+                },
+              });
+              yield* sendUpdate({ sessionUpdate: "usage_update", used: 9500, size: 1048576 });
+            }),
+        },
+      );
+      const { session, providerThread, prompts, startTurn, until, throughPromptSettled } = opened;
+      yield* startTurn(1, false);
+      const prompt = yield* throughPromptSettled;
+      const providerTurnId = prompt.flatMap((event) =>
+        event.type === "provider_turn.updated" ? [event.providerTurn.id] : [],
+      )[0]!;
+
+      yield* TestClock.adjust("20 minutes");
+      yield* session.steerTurn({
+        threadId: ThreadId.make("thread-antigravity-wake"),
+        runId: RunId.make("run-antigravity-wake-1"),
+        providerThread,
+        providerTurnId,
+        message: {
+          messageId: MessageId.make("message-antigravity-hold-steer"),
+          text: "Any status yet?",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+      });
+      yield* until(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "assistant_message" &&
+          event.turnItem.status === "completed",
+      );
+      assert.lengthOf(prompts, 2);
+
+      // 20 minutes after the steer (40 total): the old hold timer must not wake early.
+      yield* TestClock.adjust("20 minutes");
+      assert.lengthOf(prompts, 2);
+
+      // 31 minutes after the steer settled: now the one-shot wake fires.
+      yield* TestClock.adjust("11 minutes");
+      const run = yield* until((event) => event.type === "turn.terminal");
+      const terminal = run.at(-1);
+      assert.lengthOf(prompts, 3);
+      assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
+      assert.include(JSON.stringify(run), "Reported after wake.");
+    }).pipe(Effect.provide(layerSession)),
+  );
+
+  // fork: Stop during an active hold-expiry wake prompt interrupts the turn cleanly.
+  it.effect("interrupts a hold-expiry wake prompt cleanly on Stop", () =>
+    Effect.gen(function* () {
+      const opened = yield* openSessionWithRunningCommand({ WaitMsBeforeAsync: 10000 });
+      yield* opened.startTurn(1, false);
+      const started = yield* opened.throughPromptSettled;
+      const turn = started.find((event) => event.type === "provider_turn.updated");
+      if (turn?.type !== "provider_turn.updated") return assert.fail("the turn must start");
+
+      yield* TestClock.adjust("31 minutes");
+      assert.lengthOf(opened.prompts, 2, "hold expiry wakes the agent");
+      const interrupt = yield* opened.session
+        .interruptTurn({
+          providerThread: opened.providerThread,
+          providerTurnId: turn.providerTurn.id,
+          requestRuntimeRestart: true,
+        })
+        .pipe(Effect.forkScoped({ startImmediately: true }));
+      yield* opened.releaseSteer;
+      yield* Fiber.join(interrupt);
+      const terminal = (yield* opened.throughTerminal).at(-1);
+      assert.equal(terminal?.type === "turn.terminal" && terminal.status, "interrupted");
+      assert.equal(opened.cancels(), 1);
+      assert.lengthOf(opened.prompts, 2);
     }).pipe(Effect.provide(layerSession)),
   );
 
