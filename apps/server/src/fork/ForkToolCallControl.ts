@@ -2,6 +2,7 @@ import {
   ForkToolCallControlError,
   type ForkMoveToolCallToBackgroundInput,
   type ForkStopToolCallInput,
+  isProviderNativeSubagentThread,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -50,6 +51,33 @@ const make = Effect.gen(function* () {
         ...(cause === undefined ? {} : { cause }),
       });
 
+  const findOwnerClaudeProviderThread = Effect.fn(
+    "ForkToolCallControl.findOwnerClaudeProviderThread",
+  )(function* (
+    ownerThreadId: ForkMoveToolCallToBackgroundInput["threadId"],
+    fail: ReturnType<typeof makeFail>,
+  ) {
+    const ownerRecords = yield* orchestrator
+      .getThreadRecords(ownerThreadId, ["providerThreads"])
+      .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
+    if (ownerRecords.thread.deletedAt !== null) return yield* fail("unavailable");
+    const active = ownerRecords.providerThreads.find(
+      (candidate) =>
+        candidate.id === ownerRecords.thread.activeProviderThreadId &&
+        candidate.appThreadId === ownerThreadId &&
+        candidate.driver === "claudeAgent",
+    );
+    return (
+      active ??
+      ownerRecords.providerThreads.findLast(
+        (candidate) =>
+          candidate.appThreadId === ownerThreadId &&
+          candidate.driver === "claudeAgent" &&
+          candidate.providerSessionId !== null,
+      )
+    );
+  });
+
   const resolveLiveTarget = Effect.fn("ForkToolCallControl.resolveLiveTarget")(function* (
     input: {
       readonly threadId: ForkMoveToolCallToBackgroundInput["threadId"];
@@ -70,10 +98,17 @@ const make = Effect.gen(function* () {
       .getThreadRecords(input.threadId, ["providerThreads"])
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     if (records.thread.deletedAt !== null) return yield* fail("unavailable");
-    const providerThread = records.providerThreads.find(
-      (candidate) =>
-        candidate.id === item.providerThreadId && candidate.appThreadId === input.threadId,
-    );
+    // Native Claude subagent child threads share their root thread's Claude session.
+    const providerThread =
+      item.providerThreadId !== null
+        ? records.providerThreads.find(
+            (candidate) =>
+              candidate.id === item.providerThreadId && candidate.appThreadId === input.threadId,
+          )
+        : isProviderNativeSubagentThread(records.thread) &&
+            records.thread.lineage.rootThreadId !== input.threadId
+          ? yield* findOwnerClaudeProviderThread(records.thread.lineage.rootThreadId, fail)
+          : undefined;
     if (providerThread === undefined || providerThread.driver !== "claudeAgent") {
       return yield* fail("unsupported");
     }
@@ -85,13 +120,16 @@ const make = Effect.gen(function* () {
       .get(providerThread.providerSessionId)
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     if (Option.isNone(runtime)) return yield* fail("unavailable");
-    return { providerThread, nativeItemId, runtime: runtime.value };
+    return { item, providerThread, nativeItemId, runtime: runtime.value };
   });
 
   const moveToBackground = Effect.fn("ForkToolCallControl.moveToBackground")(
     function* (input: ForkMoveToolCallToBackgroundInput) {
       const fail = makeFail(input);
-      const { providerThread, nativeItemId, runtime } = yield* resolveLiveTarget(input, fail);
+      const { item, providerThread, nativeItemId, runtime } = yield* resolveLiveTarget(input, fail);
+      if (item.type === "subagent" && item.backgrounded === true) {
+        return yield* fail("not-running");
+      }
       const move = runtime.moveToolCallToBackground;
       if (move === undefined) return yield* fail("unsupported");
       // Bounded so a provider that never answers cannot hold the thread lock.

@@ -9,6 +9,7 @@ export const ForkToolBackgroundEnabled = Schema.Boolean;
 interface MovableInput {
   readonly runLive: boolean;
   readonly enabled: boolean;
+  readonly turnWaitingOnly?: boolean;
 }
 
 export interface MovableToolCallCandidate {
@@ -22,7 +23,10 @@ const isShellDynamicToolName = (toolName: string | null | undefined) => {
   return normalized === "bash" || normalized === "powershell";
 };
 
-export const isMovableTurnItem = (item: OrchestrationV2TurnItem | undefined, input: MovableInput) =>
+export const isStoppableTurnItem = (
+  item: OrchestrationV2TurnItem | undefined,
+  input: MovableInput,
+) =>
   input.enabled &&
   input.runLive &&
   item?.nativeItemRef?.driver === "claudeAgent" &&
@@ -31,36 +35,55 @@ export const isMovableTurnItem = (item: OrchestrationV2TurnItem | undefined, inp
     item.type === "subagent" ||
     (item.type === "dynamic_tool" && isShellDynamicToolName(item.toolName)));
 
+export const isMovableTurnItem = (item: OrchestrationV2TurnItem | undefined, input: MovableInput) =>
+  isStoppableTurnItem(item, input) &&
+  !(item?.type === "subagent" && (item.backgrounded === true || input.turnWaitingOnly === true));
+
+export const isStoppableToolCall = (entry: WorkLogEntry, input: MovableInput) =>
+  isStoppableTurnItem(entry.structuredPayload, input);
+
 export const isMovableToolCall = (entry: WorkLogEntry, input: MovableInput) =>
   isMovableTurnItem(entry.structuredPayload, input);
 
-const movableCandidate = (
+const matchingCandidate = (
   entry: TimelineEntry,
-  input: MovableInput,
+  predicate: (item: OrchestrationV2TurnItem | undefined) => boolean,
 ): MovableToolCallCandidate | null => {
   if (entry.kind === "work") {
-    return isMovableToolCall(entry.entry, input)
+    return predicate(entry.entry.structuredPayload)
       ? { id: entry.entry.id, createdAt: entry.entry.createdAt }
       : null;
   }
   if (entry.kind === "event") {
-    return isMovableTurnItem(entry.projectedItem.item, input)
+    return predicate(entry.projectedItem.item)
       ? { id: entry.id, createdAt: entry.createdAt }
       : null;
   }
   return null;
 };
 
-export const newestMovableToolCall = (
+const newestMatchingToolCall = (
   entries: ReadonlyArray<TimelineEntry>,
-  input: MovableInput,
+  predicate: (item: OrchestrationV2TurnItem | undefined) => boolean,
 ): MovableToolCallCandidate | null =>
   entries
     .flatMap((entry) => {
-      const candidate = movableCandidate(entry, input);
+      const candidate = matchingCandidate(entry, predicate);
       return candidate === null ? [] : [candidate];
     })
     .reduce<MovableToolCallCandidate | null>(
       (newest, entry) => (newest === null || entry.createdAt > newest.createdAt ? entry : newest),
       null,
     );
+
+export const newestMovableToolCall = (
+  entries: ReadonlyArray<TimelineEntry>,
+  input: MovableInput,
+): MovableToolCallCandidate | null =>
+  newestMatchingToolCall(entries, (item) => isMovableTurnItem(item, input));
+
+export const newestStoppableToolCall = (
+  entries: ReadonlyArray<TimelineEntry>,
+  input: MovableInput,
+): MovableToolCallCandidate | null =>
+  newestMatchingToolCall(entries, (item) => isStoppableTurnItem(item, input));

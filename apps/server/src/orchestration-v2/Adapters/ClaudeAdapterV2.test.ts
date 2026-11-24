@@ -6499,6 +6499,265 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         });
         assert.isTrue(moved);
         assert.deepStrictEqual(backgroundCalls, ["toolu_agent_1"]);
+
+        yield* harness.until(() =>
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "subagent" &&
+              event.turnItem.nativeItemRef?.nativeId === "task-move-subagent" &&
+              event.turnItem.backgrounded === true,
+          ),
+        );
+
+        // Once moved, a second request returns false without calling the SDK again.
+        const second = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "task-move-subagent",
+        });
+        assert.isFalse(second);
+        assert.deepStrictEqual(backgroundCalls, ["toolu_agent_1"]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect("marks an async-started subagent backgrounded and refuses moving it again", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return true;
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        assert.isDefined(moveToolCallToBackground);
+        if (moveToolCallToBackground === undefined) return;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-bg-subagent"),
+            text: "Run an async subagent.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-bg-subagent",
+            tool_use_id: "toolu_bg_agent_1",
+            description: "Async wait",
+            subagent_type: "general-purpose",
+            is_backgrounded: true,
+            task_type: "local_agent",
+            prompt: "Wait in the background.",
+            uuid: "00000000-0000-4000-8000-000000038004",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        yield* harness.until(() =>
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "subagent" &&
+              event.turnItem.nativeItemRef?.nativeId === "task-bg-subagent" &&
+              event.turnItem.backgrounded === true,
+          ),
+        );
+
+        const moved = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "task-bg-subagent",
+        });
+        assert.isFalse(moved);
+        assert.deepStrictEqual(backgroundCalls, []);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect(
+      "marks a foreground subagent backgrounded on task_updated patch.is_backgrounded",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarnessWithOptions({});
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("attempt-claude-task-updated-bg"),
+              text: "Run a foreground subagent.",
+              attachments: [],
+            }),
+          );
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "system",
+              subtype: "task_started",
+              task_id: "task-fg-to-bg",
+              tool_use_id: "toolu_fg_to_bg_1",
+              description: "Foreground then background",
+              subagent_type: "general-purpose",
+              is_backgrounded: false,
+              task_type: "local_agent",
+              prompt: "Wait.",
+              uuid: "00000000-0000-4000-8000-000000038005",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "system",
+              subtype: "task_updated",
+              task_id: "task-fg-to-bg",
+              patch: { is_backgrounded: true },
+              uuid: "00000000-0000-4000-8000-000000038006",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+
+          yield* harness.until(() =>
+            harness.events.some(
+              (event) =>
+                event.type === "turn_item.updated" &&
+                event.turnItem.type === "subagent" &&
+                event.turnItem.nativeItemRef?.nativeId === "task-fg-to-bg" &&
+                event.turnItem.backgrounded === true,
+            ),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
+          ),
+        ),
+    );
+
+    it.effect("moves and stops a foreground PowerShell command running inside a subagent", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const stopCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return toolUseId === "toolu_inner_ps_1";
+            }),
+          stopTask: (taskId) =>
+            Effect.sync(() => {
+              stopCalls.push(taskId);
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        const stopToolCall = harness.runtime.stopToolCall;
+        assert.isDefined(moveToolCallToBackground);
+        assert.isDefined(stopToolCall);
+        if (moveToolCallToBackground === undefined || stopToolCall === undefined) return;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-inner-ps"),
+            text: "Start a subagent with a foreground ping.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-parent-subagent",
+            tool_use_id: "toolu_parent_agent",
+            description: "Run ping wait",
+            subagent_type: "general-purpose",
+            is_backgrounded: true,
+            task_type: "local_agent",
+            prompt: "Run ping.",
+            uuid: "00000000-0000-4000-8000-000000038007",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            uuid: "00000000-0000-4000-8000-000000038008",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: "toolu_parent_agent",
+            message: {
+              id: "msg_inner_ps",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_inner_ps_1",
+                  name: "PowerShell",
+                  input: { command: "ping -n 601 127.0.0.1 > $null" },
+                },
+              ],
+            },
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-inner-ps-1",
+            tool_use_id: "toolu_inner_ps_1",
+            description: "Wait about 600 seconds",
+            is_backgrounded: false,
+            parent_task_id: "task-parent-subagent",
+            task_type: "local_bash",
+            uuid: "00000000-0000-4000-8000-000000038009",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        assert.isTrue(
+          yield* moveToolCallToBackground({
+            providerThread: harness.providerThread,
+            nativeItemId: "toolu_inner_ps_1",
+          }),
+        );
+        assert.deepStrictEqual(backgroundCalls, ["toolu_inner_ps_1"]);
+
+        assert.isTrue(
+          yield* stopToolCall({
+            providerThread: harness.providerThread,
+            nativeItemId: "toolu_inner_ps_1",
+          }),
+        );
+        assert.deepStrictEqual(stopCalls, ["task-inner-ps-1"]);
       }).pipe(
         Effect.scoped,
         Effect.provide(

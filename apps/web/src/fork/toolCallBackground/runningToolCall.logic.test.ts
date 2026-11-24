@@ -2,7 +2,13 @@ import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { TimelineEntry, WorkLogEntry } from "~/session-logic";
-import { isMovableToolCall, newestMovableToolCall } from "./runningToolCall.logic";
+import {
+  isMovableToolCall,
+  isMovableTurnItem,
+  isStoppableTurnItem,
+  newestMovableToolCall,
+  newestStoppableToolCall,
+} from "./runningToolCall.logic";
 
 const entry = (input: {
   readonly id?: string;
@@ -37,6 +43,7 @@ const subagentEvent = (input: {
   readonly id?: string;
   readonly status: string;
   readonly driver?: string;
+  readonly backgrounded?: boolean;
   readonly createdAt?: string;
 }): TimelineEntry =>
   ({
@@ -49,6 +56,7 @@ const subagentEvent = (input: {
         type: "subagent",
         status: input.status,
         driver: input.driver ?? "claudeAgent",
+        ...(input.backgrounded === undefined ? {} : { backgrounded: input.backgrounded }),
         nativeItemRef: { driver: input.driver ?? "claudeAgent", nativeId: "task-1" },
       },
     },
@@ -176,5 +184,54 @@ describe("newestMovableToolCall", () => {
         enabled: true,
       }),
     ).toBeNull();
+  });
+
+  it("skips already-backgrounded subagents for Move to background while keeping Stop available", () => {
+    const fgCommand = entry({
+      id: "cmd-1",
+      itemType: "command_execution",
+      status: "running",
+      createdAt: "2026-11-21T10:00:00.000Z",
+    });
+    const bgSubagent = subagentEvent({
+      id: "sub-bg-1",
+      status: "running",
+      backgrounded: true,
+      createdAt: "2026-11-21T10:06:00.000Z",
+    });
+    expect(
+      newestMovableToolCall([work(fgCommand), bgSubagent], {
+        runLive: true,
+        enabled: true,
+      })?.id,
+    ).toBe("cmd-1");
+    expect(
+      newestMovableToolCall([bgSubagent], {
+        runLive: true,
+        enabled: true,
+      }),
+    ).toBeNull();
+    expect(
+      newestStoppableToolCall([bgSubagent], {
+        runLive: true,
+        enabled: true,
+      })?.id,
+    ).toBe("sub-bg-1");
+  });
+
+  it("treats running subagents on a waiting-only thread as stoppable but not movable", () => {
+    const subagent = {
+      id: "sub-waiting-1",
+      type: "subagent",
+      status: "running",
+      driver: "claudeAgent",
+      nativeItemRef: { driver: "claudeAgent", nativeId: "task-1" },
+    } as unknown as OrchestrationV2TurnItem;
+    expect(
+      isMovableTurnItem(subagent, { runLive: true, enabled: true, turnWaitingOnly: true }),
+    ).toBe(false);
+    expect(
+      isStoppableTurnItem(subagent, { runLive: true, enabled: true, turnWaitingOnly: true }),
+    ).toBe(true);
   });
 });

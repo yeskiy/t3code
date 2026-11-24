@@ -8432,6 +8432,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly owner?: ActiveClaudeSubagent;
           readonly nativeTaskType?: string;
           readonly progress?: string;
+          // fork: Tracks whether a running Claude subagent is already detached from its parent turn.
+          readonly backgrounded?: boolean;
           readonly workflowFrame?: unknown;
           readonly workflowName?: string;
           readonly workflowRunHandles?: OrchestrationV2WorkflowRunHandles;
@@ -8543,6 +8545,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     )
                   : undefined));
           const model = input.model ?? priorTask?.model ?? null;
+          // fork: Preserve whether the subagent is backgrounded across updates; reset on reopen.
+          const backgrounded =
+            input.backgrounded ?? (isReopen ? undefined : priorTask?.backgrounded);
           const movesToCurrentRun =
             input.reopen === true && input.status === "running" && existingSubagent !== undefined;
           const task = {
@@ -8584,6 +8589,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }
               : {}),
             ...(input.progress === undefined ? {} : { progress: input.progress }),
+            // fork: Propagate backgrounded state onto the subagent record.
+            ...(backgrounded === undefined ? {} : { backgrounded }),
             ...(workflowWithThreads === undefined ? {} : { workflow: workflowWithThreads }),
             ...(input.result === undefined ? {} : { result: input.result }),
             ...(isReopen ? { startedAt: now } : {}),
@@ -8812,6 +8819,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               childThreadId: task.childThreadId,
               prompt: task.prompt,
               ...(task.progress === undefined ? {} : { progress: task.progress }),
+              // fork: Propagate backgrounded state onto the subagent turn item.
+              ...(task.backgrounded === undefined ? {} : { backgrounded: task.backgrounded }),
               result: task.result,
             },
           });
@@ -12083,6 +12092,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   : {}),
 
                 title: message.description,
+                // fork: Record whether Claude started this subagent in the background.
+                ...(typeof message.is_backgrounded === "boolean"
+                  ? { backgrounded: message.is_backgrounded }
+                  : {}),
                 status: "running",
                 reopen: true,
                 ...(message.run_id === undefined ? {} : { nativeRunId: message.run_id }),
@@ -12160,6 +12173,30 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 workflowFrame: message,
                 status: "running",
               });
+            }
+          }
+
+          // fork: Mark a foreground subagent backgrounded when Claude detaches it mid-turn.
+          if (
+            message.type === "system" &&
+            message.subtype === "task_updated" &&
+            message.patch?.is_backgrounded === true
+          ) {
+            const registered = (yield* Ref.get(sessionSubagentsByTaskId)).get(message.task_id);
+            if (registered?.task.status === "running") {
+              if (!(yield* isNestedSubagentTask(message.task_id))) {
+                yield* Ref.update(backgroundedSubagentTaskIds, (current) =>
+                  current.has(message.task_id) ? current : new Set(current).add(message.task_id),
+                );
+              }
+              if (registered.task.backgrounded !== true) {
+                yield* updateClaudeSubagentNode({
+                  context,
+                  taskId: message.task_id,
+                  status: "running",
+                  backgrounded: true,
+                });
+              }
             }
           }
 
@@ -15327,20 +15364,34 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           moveToolCallToBackground: Effect.fn("ClaudeAdapterV2.moveToolCallToBackground")(
             function* ({ providerThread, nativeItemId }) {
               const liveQuery = yield* Ref.get(queryContext);
-              const subagents = yield* Ref.get(sessionSubagentsByTaskId);
-              // A subagent row carries its task id. A Bash row carries its tool_use id.
-              const toolUseId = subagents.get(nativeItemId)?.runToolUseId ?? nativeItemId;
               if (
                 liveQuery === null ||
                 liveQuery.stopping ||
                 liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId ||
-                toolUseId.length === 0
+                nativeItemId.length === 0
               ) {
                 return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                   driver: CLAUDE_PROVIDER,
                   detail: "No live Claude query belongs to this provider thread",
                 });
               }
+              const subagents = yield* Ref.get(sessionSubagentsByTaskId);
+              const subagent = subagents.get(nativeItemId);
+              if (subagent !== undefined) {
+                const alreadyBackgrounded =
+                  subagent.task.backgrounded === true ||
+                  (yield* Ref.get(backgroundedSubagentTaskIds)).has(nativeItemId);
+                if (
+                  subagent.task.status !== "running" ||
+                  liveQuery.subagentsFromEarlierProcesses.has(subagent) ||
+                  subagent.runToolUseId === null ||
+                  alreadyBackgrounded
+                ) {
+                  return false;
+                }
+              }
+              // A subagent row carries its task id. A Bash row carries its tool_use id.
+              const toolUseId = subagent?.runToolUseId ?? nativeItemId;
               const moved = yield* liveQuery.query.backgroundTasks(toolUseId).pipe(
                 Effect.mapError(
                   (cause) =>
@@ -15354,13 +15405,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               if (moved) {
                 const taskIds = [...(yield* Ref.get(sessionSubagentsByTaskId))]
                   .filter(
-                    ([, subagent]) =>
-                      subagent.runToolUseId === toolUseId && subagent.task.status === "running",
+                    ([, candidate]) =>
+                      candidate.runToolUseId === toolUseId && candidate.task.status === "running",
                   )
                   .map(([taskId]) => taskId);
                 yield* Ref.update(backgroundedSubagentTaskIds, (current) =>
                   taskIds.length === 0 ? current : new Set([...current, ...taskIds]),
                 );
+                const turnContext =
+                  (yield* Ref.get(activeTurn)) ??
+                  settledTurnByNativeThread.get(liveQuery.nativeThreadId) ??
+                  null;
+                if (turnContext !== null) {
+                  for (const taskId of taskIds) {
+                    yield* updateClaudeSubagentNode({
+                      context: turnContext,
+                      taskId,
+                      status: "running",
+                      backgrounded: true,
+                    });
+                  }
+                }
               }
               return moved;
             },

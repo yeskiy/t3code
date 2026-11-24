@@ -21,7 +21,16 @@ const itemId = TurnItemId.make("item-fork-tool-call");
 const providerThreadId = ProviderThreadId.make("provider-thread-fork-tool-call");
 const providerSessionId = ProviderSessionId.make("provider-session-fork-tool-call");
 
-const makeItem = (overrides: Partial<{ type: string; status: string; toolName: string }> = {}) =>
+const makeItem = (
+  overrides: Partial<{
+    type: string;
+    status: string;
+    toolName: string;
+    threadId: ThreadId;
+    providerThreadId: ProviderThreadId | null;
+    backgrounded: boolean;
+  }> = {},
+) =>
   ({
     id: itemId,
     threadId,
@@ -32,10 +41,10 @@ const makeItem = (overrides: Partial<{ type: string; status: string; toolName: s
     ...overrides,
   }) as unknown as OrchestrationV2TurnItem;
 
-const makeProviderThread = (driver = "claudeAgent") =>
+const makeProviderThread = (driver = "claudeAgent", appThreadId: ThreadId = threadId) =>
   ({
     id: providerThreadId,
-    appThreadId: threadId,
+    appThreadId,
     driver: ProviderDriverKind.make(driver),
     providerSessionId,
     nativeThreadRef: { driver, nativeId: "native-session", strength: "strong" },
@@ -43,14 +52,25 @@ const makeProviderThread = (driver = "claudeAgent") =>
 
 const run = (input: {
   readonly action?: "move" | "stop";
+  readonly targetThreadId?: ThreadId;
   readonly item?: OrchestrationV2TurnItem;
   readonly providerThread?: OrchestrationV2ProviderThread;
+  readonly recordsByThread?: Readonly<
+    Record<
+      string,
+      {
+        readonly thread: Record<string, unknown>;
+        readonly providerThreads: ReadonlyArray<OrchestrationV2ProviderThread>;
+      }
+    >
+  >;
   readonly move?: ProviderAdapter.ProviderAdapterV2SessionRuntime["moveToolCallToBackground"];
   readonly stop?: ProviderAdapter.ProviderAdapterV2SessionRuntime["stopToolCall"];
 }) => {
   const calls: Array<string> = [];
   const move = input.move;
   const stop = input.stop;
+  const targetThreadId = input.targetThreadId ?? threadId;
   const runtime = {
     ...(move === undefined
       ? {}
@@ -70,11 +90,13 @@ const run = (input: {
       Layer.mergeAll(
         Layer.mock(Orchestrator.OrchestratorV2)({
           getTurnItem: () => Effect.succeed(input.item ?? makeItem()),
-          getThreadRecords: () =>
-            Effect.succeed({
-              thread: { deletedAt: null },
-              providerThreads: [input.providerThread ?? makeProviderThread()],
-            } as never),
+          getThreadRecords: (requestedThreadId) =>
+            Effect.succeed(
+              (input.recordsByThread?.[requestedThreadId] ?? {
+                thread: { deletedAt: null },
+                providerThreads: [input.providerThread ?? makeProviderThread()],
+              }) as never,
+            ),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           get: () => Effect.succeedSome(runtime),
@@ -84,8 +106,8 @@ const run = (input: {
   );
   return ForkToolCallControl.ForkToolCallControl.use((control) =>
     input.action === "stop"
-      ? control.stop({ threadId, itemId })
-      : control.moveToBackground({ threadId, itemId }),
+      ? control.stop({ threadId: targetThreadId, itemId })
+      : control.moveToBackground({ threadId: targetThreadId, itemId }),
   ).pipe(
     Effect.result,
     Effect.map((result) => ({ result, calls })),
@@ -178,6 +200,79 @@ describe("ForkToolCallControl.moveToBackground", () => {
       assert.equal(reasonOf(result), "move-failed");
     }),
   );
+
+  it.effect("refuses an already-backgrounded subagent without calling the runtime", () =>
+    Effect.gen(function* () {
+      const { result, calls } = yield* run({
+        item: makeItem({ type: "subagent", backgrounded: true }),
+        move: () => Effect.succeed(true),
+      });
+      assert.equal(reasonOf(result), "not-running");
+      assert.deepStrictEqual(calls, []);
+    }),
+  );
+
+  it.effect("resolves the root Claude provider thread for a command inside a native subagent", () =>
+    Effect.gen(function* () {
+      const childThreadId = ThreadId.make("thread:subagent:child-1");
+      const { result, calls } = yield* run({
+        targetThreadId: childThreadId,
+        item: makeItem({ threadId: childThreadId, providerThreadId: null }),
+        recordsByThread: {
+          [childThreadId]: {
+            thread: {
+              deletedAt: null,
+              creationSource: "provider",
+              lineage: {
+                parentThreadId: threadId,
+                relationshipToParent: "subagent",
+                rootThreadId: threadId,
+              },
+            },
+            providerThreads: [],
+          },
+          [threadId]: {
+            thread: { deletedAt: null, activeProviderThreadId: providerThreadId },
+            providerThreads: [makeProviderThread("claudeAgent", threadId)],
+          },
+        },
+        move: () => Effect.succeed(true),
+      });
+      assert.equal(result._tag, "Success");
+      assert.deepStrictEqual(calls, ["toolu_1"]);
+    }),
+  );
+
+  it.effect("refuses a command inside a non-Claude native subagent child thread", () =>
+    Effect.gen(function* () {
+      const childThreadId = ThreadId.make("thread:subagent:codex-1");
+      const { result, calls } = yield* run({
+        targetThreadId: childThreadId,
+        item: makeItem({ threadId: childThreadId, providerThreadId: null }),
+        recordsByThread: {
+          [childThreadId]: {
+            thread: {
+              deletedAt: null,
+              creationSource: "provider",
+              lineage: {
+                parentThreadId: threadId,
+                relationshipToParent: "subagent",
+                rootThreadId: threadId,
+              },
+            },
+            providerThreads: [],
+          },
+          [threadId]: {
+            thread: { deletedAt: null, activeProviderThreadId: providerThreadId },
+            providerThreads: [makeProviderThread("codex", threadId)],
+          },
+        },
+        move: () => Effect.succeed(true),
+      });
+      assert.equal(reasonOf(result), "unsupported");
+      assert.deepStrictEqual(calls, []);
+    }),
+  );
 });
 
 describe("ForkToolCallControl.stop", () => {
@@ -267,6 +362,50 @@ describe("ForkToolCallControl.stop", () => {
           ),
       });
       assert.equal(reasonOf(result), "stop-failed");
+    }),
+  );
+
+  it.effect("stops an already-backgrounded running subagent", () =>
+    Effect.gen(function* () {
+      const { result, calls } = yield* run({
+        action: "stop",
+        item: makeItem({ type: "subagent", backgrounded: true }),
+        stop: () => Effect.succeed(true),
+      });
+      assert.equal(result._tag, "Success");
+      assert.deepStrictEqual(calls, ["toolu_1"]);
+    }),
+  );
+
+  it.effect("stops a command inside a native Claude subagent via the root provider thread", () =>
+    Effect.gen(function* () {
+      const childThreadId = ThreadId.make("thread:subagent:child-stop-1");
+      const { result, calls } = yield* run({
+        action: "stop",
+        targetThreadId: childThreadId,
+        item: makeItem({ threadId: childThreadId, providerThreadId: null }),
+        recordsByThread: {
+          [childThreadId]: {
+            thread: {
+              deletedAt: null,
+              creationSource: "provider",
+              lineage: {
+                parentThreadId: threadId,
+                relationshipToParent: "subagent",
+                rootThreadId: threadId,
+              },
+            },
+            providerThreads: [],
+          },
+          [threadId]: {
+            thread: { deletedAt: null, activeProviderThreadId: providerThreadId },
+            providerThreads: [makeProviderThread("claudeAgent", threadId)],
+          },
+        },
+        stop: () => Effect.succeed(true),
+      });
+      assert.equal(result._tag, "Success");
+      assert.deepStrictEqual(calls, ["toolu_1"]);
     }),
   );
 });

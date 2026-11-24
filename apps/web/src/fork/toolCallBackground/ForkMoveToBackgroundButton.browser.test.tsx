@@ -172,4 +172,52 @@ describe("ForkMoveToBackgroundButton", () => {
     expect(moveButton.element().parentElement?.closest("button")).toBeNull();
     expect(stopButton.element().parentElement?.closest("button")).toBeNull();
   });
+
+  it("hides Move to background and keeps Stop on an already-backgrounded Claude subagent row", async () => {
+    const bgSubagentItem = {
+      id: TurnItemId.make("item-sub-bg-1"),
+      threadId: ThreadId.make("thread"),
+      type: "subagent",
+      status: "running",
+      backgrounded: true,
+      subagentId: NodeId.make("node-sub-bg-1"),
+      origin: "provider_native",
+      driver: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      nativeItemRef: { driver: "claudeAgent", nativeId: "task-sub-bg-1", strength: "strong" },
+      title: "Background subagent",
+      result: null,
+      progress: undefined,
+      startedAt: null,
+      completedAt: null,
+      childThreadId: ThreadId.make("child-thread-bg-1"),
+    } as unknown as OrchestrationV2TurnItem;
+    await using screen = await render(
+      <TimelineRowCtx
+        value={
+          {
+            activeThreadEnvironmentId: EnvironmentId.make("environment"),
+            threadRef: {
+              environmentId: EnvironmentId.make("environment"),
+              threadId: ThreadId.make("thread"),
+            },
+            canOperateThread: true,
+          } as unknown as TimelineRowSharedState
+        }
+      >
+        <TimelineRowActivityCtx value={{ isWorking: true } as unknown as TimelineRowActivityState}>
+          <V2LifecycleRow
+            environmentId={EnvironmentId.make("environment")}
+            item={bgSubagentItem}
+            runs={[]}
+            onOpenThread={() => {}}
+          />
+        </TimelineRowActivityCtx>
+      </TimelineRowCtx>,
+    );
+    expect(screen.container.textContent).not.toContain("Move to background");
+    const stopButton = screen.getByRole("button", { name: "Stop this command" });
+    await expect.element(stopButton).toBeVisible();
+    expect(stopButton.element().parentElement?.closest("button")).toBeNull();
+  });
 });

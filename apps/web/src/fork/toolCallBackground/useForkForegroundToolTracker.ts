@@ -1,5 +1,12 @@
 /* oxlint-disable t3code/no-untranslated-copy -- fork-only English copy */
-import type { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  ForkToolCallControlError,
+  type EnvironmentId,
+  type ThreadId,
+  type TurnItemId,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { useEffect } from "react";
 
 import { toastManager } from "~/components/ui/toast";
@@ -10,14 +17,51 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import {
   type ForkMoveTarget,
   readForkMoveTarget,
+  readForkStopTarget,
   setForkMoveTarget,
+  setForkStopTarget,
 } from "./foregroundToolContext";
 import { forkMoveToolCallToBackground, forkStopToolCall } from "./forkToolCallCommands";
 import {
   FORK_TOOL_BACKGROUND_KEY,
   ForkToolBackgroundEnabled,
   newestMovableToolCall,
+  newestStoppableToolCall,
 } from "./runningToolCall.logic";
+
+const isForkToolCallControlError = Schema.is(ForkToolCallControlError);
+
+const moveFailureTitle = (error: unknown): string => {
+  if (!isForkToolCallControlError(error)) {
+    return "Could not move the command to the background";
+  }
+  switch (error.reason) {
+    case "not-running":
+      return "That task is no longer running in the foreground";
+    case "unsupported":
+      return "This tool call cannot be moved to the background";
+    case "unavailable":
+      return "The Claude session is not active";
+    default:
+      return "Could not move the command to the background";
+  }
+};
+
+const stopFailureTitle = (error: unknown): string => {
+  if (!isForkToolCallControlError(error)) {
+    return "Could not stop the command";
+  }
+  switch (error.reason) {
+    case "not-running":
+      return "That task is no longer running";
+    case "unsupported":
+      return "This tool call cannot be stopped directly";
+    case "unavailable":
+      return "The Claude session is not active";
+    default:
+      return "Could not stop the command";
+  }
+};
 
 export const useForkToolBackgroundEnabled = () =>
   useLocalStorage(FORK_TOOL_BACKGROUND_KEY, true, ForkToolBackgroundEnabled);
@@ -30,7 +74,10 @@ export function useForkMoveToolCall() {
       input: { threadId: target.threadId, itemId: target.itemId },
     });
     if (result._tag === "Failure") {
-      toastManager.add({ type: "error", title: "Could not move the command to the background" });
+      toastManager.add({
+        type: "error",
+        title: moveFailureTitle(squashAtomCommandFailure(result)),
+      });
     }
   };
 }
@@ -40,18 +87,32 @@ export function useForkForegroundToolTracker(input: {
   readonly threadId: ThreadId;
   readonly entries: ReadonlyArray<TimelineEntry>;
   readonly runLive: boolean;
+  readonly turnWaitingOnly?: boolean;
   readonly focused: boolean;
 }) {
   const [enabled] = useForkToolBackgroundEnabled();
   const { environmentId, threadId, focused } = input;
-  const itemId =
-    newestMovableToolCall(input.entries, { runLive: input.runLive, enabled })?.id ?? null;
+  const eligibility = {
+    runLive: input.runLive,
+    enabled,
+    ...(input.turnWaitingOnly === undefined ? {} : { turnWaitingOnly: input.turnWaitingOnly }),
+  };
+  const moveItemId = newestMovableToolCall(input.entries, eligibility)?.id ?? null;
+  const stopItemId = newestStoppableToolCall(input.entries, eligibility)?.id ?? null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the focused thread's running tool call to the keybinding context
   useEffect(() => {
-    if (!focused || itemId === null) return;
-    setForkMoveTarget({ environmentId, threadId, itemId: itemId as TurnItemId });
-    return () => setForkMoveTarget(null);
-  }, [focused, environmentId, threadId, itemId]);
+    if (!focused || (moveItemId === null && stopItemId === null)) return;
+    setForkMoveTarget(
+      moveItemId === null ? null : { environmentId, threadId, itemId: moveItemId as TurnItemId },
+    );
+    setForkStopTarget(
+      stopItemId === null ? null : { environmentId, threadId, itemId: stopItemId as TurnItemId },
+    );
+    return () => {
+      setForkMoveTarget(null);
+      setForkStopTarget(null);
+    };
+  }, [focused, environmentId, threadId, moveItemId, stopItemId]);
 }
 
 export function useForkStopToolCall() {
@@ -62,7 +123,10 @@ export function useForkStopToolCall() {
       input: { threadId: target.threadId, itemId: target.itemId },
     });
     if (result._tag === "Failure") {
-      toastManager.add({ type: "error", title: "Could not stop the command" });
+      toastManager.add({
+        type: "error",
+        title: stopFailureTitle(squashAtomCommandFailure(result)),
+      });
     }
   };
 }
@@ -70,7 +134,7 @@ export function useForkStopToolCall() {
 export function useForkStopToolCallShortcut() {
   const stop = useForkStopToolCall();
   return (event: KeyboardEvent): boolean => {
-    const target = readForkMoveTarget();
+    const target = readForkStopTarget();
     if (target === null) return false;
     if (!event.repeat) void stop(target);
     return true;
