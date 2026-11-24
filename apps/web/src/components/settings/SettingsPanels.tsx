@@ -90,6 +90,7 @@ import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { ForkNewThreadDefaultRow } from "../../fork/newThreadDefault/ForkNewThreadDefaultRow";
+import { ForkExternalOpenSection } from "../../fork/externalOpen/ForkExternalOpenSection"; // fork: external open
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -973,6 +974,9 @@ export function GeneralSettingsPanel() {
         {/* fork: "New threads open in" row */}
         <ForkNewThreadDefaultRow />
       </SettingsSection>
+
+      {/* fork: "Opening links and files" section */}
+      <ForkExternalOpenSection />
 
       <SettingsSection id="confirmations" title={gt("Confirmations")}>
         <SettingsRow

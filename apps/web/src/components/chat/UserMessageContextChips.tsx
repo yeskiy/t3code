@@ -7,6 +7,7 @@ import { isSvgAttachment } from "@t3tools/shared/image";
 import { useRenderedAppearance } from "../../hooks/useTheme";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
+import { openForkFileOrFallback } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useRightPanelStore } from "~/rightPanelStore";
 import { COMPOSER_CONTEXT_KINDS } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
@@ -89,9 +90,18 @@ function UserMessageMentionChip(props: {
             render={<button type="button" />}
             aria-label={gt("Preview {name}", { name: props.record.path })}
             data-markdown-copy={props.copyMarkdown}
-            onClick={() => {
-              if (ctx.threadRef)
-                useRightPanelStore.getState().openFile(ctx.threadRef, props.record.path);
+            onClick={(event) => {
+              if (!ctx.threadRef) return;
+              const threadRef = ctx.threadRef;
+              // fork: open mentioned files in OS default app when configured.
+              void openForkFileOrFallback({
+                environmentId: threadRef.environmentId,
+                path: props.record.path,
+                cwd: ctx.workspaceRoot,
+                altKey: event.altKey,
+                fallback: () =>
+                  useRightPanelStore.getState().openFile(threadRef, props.record.path),
+              });
             }}
           >
             <WorkspaceEntryIcon

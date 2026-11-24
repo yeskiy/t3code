@@ -15,6 +15,10 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 
 import { canOpenLinksInApp } from "../browser/browserLinkTarget";
 import { useOpenLink } from "../browser/useOpenLink";
+import {
+  shouldForkInterceptInAppLink,
+  useForkOpenLinksIn,
+} from "../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useClientSettings } from "../hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { m } from "../i18n/messages";
@@ -89,13 +93,16 @@ export function useOpenChangeRequestLink(
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
   const ignoreWhitespace = useClientSettings((settings) => settings.diffIgnoreWhitespace);
-  const browserLinkTarget = useClientSettings((settings) => settings.browserLinkTarget);
+  // fork: use fork "Open links in" preference for fallback behavior.
+  const [browserLinkTarget] = useForkOpenLinksIn();
   const readDiffPreview = useAtomQueryRunner(reviewEnvironment.diffPreview, {
     reportFailure: false,
     refresh: true,
   });
   const openLink = useOpenLink(threadRef);
   return (event, targetUrl, targetThreadRef, targetEnvironmentId, onCommitUnavailable) => {
+    // fork: open PR links in the system browser when "Open links in" is System browser.
+    if (!shouldForkInterceptInAppLink()) return false;
     if (!openInApp || shouldOpenPullRequestExternally(event)) return false;
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;

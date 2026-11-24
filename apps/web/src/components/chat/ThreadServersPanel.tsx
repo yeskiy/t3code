@@ -22,6 +22,7 @@ import {
   resolveExternalServerUrl,
   tunnelsEnvironmentLoopback,
 } from "../../browser/browserTargetResolver";
+import { shouldForkInterceptInAppLink } from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { readLocalApi } from "../../localApi";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useThreadDiscoveredPorts } from "../../portDiscoveryState";
@@ -102,7 +103,8 @@ function ThreadServersList(props: ThreadServersPanelProps) {
   const open = async (server: DiscoveredLocalServer, event: MouseEvent<HTMLElement>) => {
     if (event.button > 1) return;
     // Like links: modified and middle clicks go to the system browser.
-    if (event.metaKey || event.ctrlKey || event.button === 1) {
+    // fork: plain clicks also go to the system browser when "Open links in" is System browser.
+    if (event.metaKey || event.ctrlKey || event.button === 1 || !shouldForkInterceptInAppLink()) {
       event.preventDefault();
       // This machine's browser reaches another environment's loopback only through a forward.
       // Starting a forward runs the probe; only a confirmed local environment opens directly.

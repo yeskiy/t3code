@@ -33,7 +33,14 @@ import {
 } from "../../rightPanelStore";
 import { openUrlInPreview } from "../../browser/openFileInPreview";
 import { isPreviewAvailableFor } from "../../browser/previewRuntime";
-import { resolveDiscoveredServerUrl } from "../../browser/browserTargetResolver";
+import {
+  resolveDiscoveredServerUrl,
+  resolveExternalServerUrl,
+} from "../../browser/browserTargetResolver";
+import {
+  openForkExternalBrowserUrl,
+  shouldForkInterceptInAppLink,
+} from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { confirmTerminalClose } from "../../lib/terminalCloseConfirm";
 import { findReusableProjectScriptTerminal } from "../../lib/projectScriptTerminal";
@@ -304,6 +311,23 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
       script.previewUrl &&
       isPreviewAvailableFor(activeThreadRef.environmentId)
     ) {
+      // fork: honor "Open links in" when a project script auto-opens its preview URL.
+      if (!shouldForkInterceptInAppLink()) {
+        const externalUrl = resolveExternalServerUrl(
+          activeThreadRef.environmentId,
+          script.previewUrl,
+        );
+        void openForkExternalBrowserUrl(externalUrl).catch((error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: m(msg("Could not open preview")),
+              description: thrownErrorMessage(error, m) ?? m(msg("An unexpected error occurred.")),
+            }),
+          );
+        });
+        return;
+      }
       const previewResult = await openUrlInPreview({
         threadRef: activeThreadRef,
         url: resolveDiscoveredServerUrl(activeThreadRef.environmentId, script.previewUrl),

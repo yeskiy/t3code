@@ -171,6 +171,7 @@ import {
   composerContextRecordsFromDraft,
 } from "../composerContextPresentation";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
+import { openForkFileOrFallback } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import {
   collectInlineContextIds,
   type ComposerContextReference,
@@ -735,7 +736,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (preview) onExpandImage(preview);
     },
     openFile: setPreviewFileId,
-    openMention: (path: string) => useRightPanelStore.getState().openFile(routeThreadRef, path),
+    // fork: open composer mention files in OS default app when configured.
+    openMention: (path: string) =>
+      void openForkFileOrFallback({
+        environmentId,
+        path,
+        cwd: gitCwd ?? undefined,
+        fallback: () => useRightPanelStore.getState().openFile(routeThreadRef, path),
+      }),
     expandVideo: (fileId: string) => {
       const file = composerFiles.find((candidate) => candidate.id === fileId);
       if (!file || !isVideoAttachment(file)) return;

@@ -5,6 +5,7 @@ import { T, useGT } from "gt-react";
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 import { matchInlineSkills } from "@t3tools/shared/inlineSkills";
 
+import { openForkFileOrFallback } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useRightPanelStore } from "~/rightPanelStore";
 import { SKILL_CHIP_ICON_SVG } from "../composerInlineChip";
 import { ContextChipPopover } from "../contextChipParts";
@@ -116,7 +117,14 @@ export function skillInstructionsOpener(
   skill: Pick<ServerProviderSkill, "path"> | undefined,
 ) {
   if (!threadRef || !skill?.path) return undefined;
-  return () => useRightPanelStore.getState().openFile(threadRef, skill.path);
+  const skillPath = skill.path;
+  // fork: open skill instruction files in OS default app when configured.
+  return () =>
+    void openForkFileOrFallback({
+      environmentId: threadRef.environmentId,
+      path: skillPath,
+      fallback: () => useRightPanelStore.getState().openFile(threadRef, skillPath),
+    });
 }
 
 export function SkillChipPopover(props: {

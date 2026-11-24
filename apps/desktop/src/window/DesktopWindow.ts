@@ -689,7 +689,12 @@ export const make = Effect.gen(function* () {
           menuTemplate.push({ type: "separator" });
         }
 
-        if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))) {
+        // fork: skip Copy Link when Copy Email Address handles mailto links.
+        const mailtoAddress = parseMailtoAddress(params.linkURL);
+        if (
+          Option.isNone(mailtoAddress) &&
+          Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))
+        ) {
           menuTemplate.push(
             {
               label: m(msg("Copy Link")),
@@ -701,7 +706,6 @@ export const make = Effect.gen(function* () {
           );
         }
 
-        const mailtoAddress = parseMailtoAddress(params.linkURL);
         if (Option.isSome(mailtoAddress)) {
           menuTemplate.push(
             {

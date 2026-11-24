@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { msg } from "gt-react";
 
-import { isWebUrl } from "./browser/webUrl";
+import { isSafeExternalBrowserUrl } from "./fork/externalOpen/externalOpen.logic"; // fork: external open
 import { requestConfirmDialog } from "./confirmDialog";
 import { dismissContextMenu, showContextMenuFallback } from "./contextMenuFallback";
 import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientPersistenceStorage";
@@ -35,7 +35,8 @@ export function createLocalApi(): LocalApi {
           return;
         }
 
-        if (!isWebUrl(url)) throw new Error(m(msg("Unable to open link.")));
+        // fork: allow http, https, and mailto URLs in the non-desktop fallback.
+        if (!isSafeExternalBrowserUrl(url)) throw new Error(m(msg("Unable to open link.")));
         window.open(url, "_blank", "noopener,noreferrer");
       },
       openSystemSettings: async (pane) => {
