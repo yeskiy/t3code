@@ -408,6 +408,35 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.isUndefined(options.extraArgs?.["dangerously-skip-permissions"]);
   });
 
+  // fork: per-instance launch
+  it("applies the fork launch: merged MCP file, tool limits, and agent text", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-launch-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: {
+        ...DEFAULT_CLAUDE_SETTINGS,
+        launchArgs: "--mcp-config old.json --disallowedTools Agent",
+      },
+      forkLaunch: {
+        mcpConfigPath: "C:/state/fork/mcp/claudeAgent.json",
+        disallowedTools: ["Agent"],
+        appendText: "AGENT TEXT",
+        nativeAgentOff: true,
+      },
+    });
+    assert.equal(options.extraArgs?.["mcp-config"], "C:/state/fork/mcp/claudeAgent.json");
+    assert.isUndefined(options.extraArgs?.disallowedTools);
+    assert.deepEqual(options.disallowedTools, ["Agent"]);
+    assert.include(
+      typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+        ? (options.systemPrompt.append ?? "")
+        : "",
+      "AGENT TEXT",
+    );
+  });
+
   it("passes the thread's other folders and every --add-dir and --plugin-dir launch directory to Claude", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,

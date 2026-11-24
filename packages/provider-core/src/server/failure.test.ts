@@ -142,6 +142,21 @@ it("preserves actionable T3 errors wrapped by turn startup", () => {
     }).message,
     unanswered.message,
   );
+  // fork: per-instance launch errors surface their own message
+  [
+    { _tag: "ForkMcpConfigError", message: "MCP config file C:/mcp/work.json is not valid JSON." },
+    {
+      _tag: "ForkPrepareCommandError",
+      message: "The prepare command failed with exit code 4.\nbroken",
+    },
+  ].forEach((forkError) => {
+    assert.equal(
+      makeProviderFailure({
+        cause: Cause.fail({ _tag: "ProviderAdapterTurnStartError", cause: forkError }),
+      }).message,
+      forkError.message,
+    );
+  });
 });
 
 it("names how the provider process exited and the stage it failed in, without its output", () => {
