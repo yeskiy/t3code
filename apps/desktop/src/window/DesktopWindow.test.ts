@@ -1,7 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
-import { DesktopSnapShotId } from "@t3tools/contracts";
+import {
+  DEFAULT_CLIENT_SETTINGS,
+  DesktopSnapShotId,
+  type ClientSettings,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -43,6 +47,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
+import { WEB_LINK_OPEN_CHANNEL } from "../ipc/channels.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -233,6 +238,7 @@ function layerTest(input: {
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly desktopSettings?: DesktopAppSettings.DesktopSettings;
+  readonly clientSettings?: Option.Option<ClientSettings>;
   readonly mainWindowBoundsUpdates?: DesktopAppSettings.DesktopWindowBounds[];
   readonly mainWindowMaximizedUpdates?: boolean[];
   readonly beforeMainWindowBoundsUpdate?: (
@@ -337,7 +343,9 @@ function layerTest(input: {
           ? layerDesktopEnvironment
           : layerDesktopEnvironmentFor(input.platform),
         layerDesktopAppSettings,
-        layerDesktopClientSettings,
+        input.clientSettings === undefined
+          ? layerDesktopClientSettings
+          : DesktopClientSettings.layerTest(input.clientSettings),
         layerDesktopServerExposure,
         DesktopState.layer,
         layerElectronApp,
@@ -1653,8 +1661,122 @@ describe("DesktopWindow", () => {
           {} as Electron.KeyboardEvent,
         );
         assert.equal(yield* Deferred.await(copied), "restaurant@example.com");
+        assert.isUndefined(template.find((item) => item.label === "Open in T3"));
+        assert.isUndefined(template.find((item) => item.label === "Open externally"));
       }).pipe(Effect.provide(layer));
     }),
+  );
+
+  it.effect("offers Open in T3 in the native link context menu when Open links in is system", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const popup = yield* Deferred.make<ElectronMenu.ElectronMenuTemplateInput>();
+      const openedExternalUrls: unknown[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        clientSettings: Option.some({
+          ...DEFAULT_CLIENT_SETTINGS,
+          browserLinkTarget: "system",
+        }),
+        openedExternalUrls,
+        onPopupTemplate: (input) => Deferred.succeed(popup, input),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const contextMenu = fakeWindow.webContentsListeners.get("context-menu");
+        if (!contextMenu) {
+          return yield* Effect.die("context-menu listener was not registered");
+        }
+        contextMenu(
+          { preventDefault: vi.fn() },
+          {
+            linkURL: "https://example.com/docs",
+            misspelledWord: "",
+            dictionarySuggestions: [],
+            mediaType: "none",
+            editFlags: { canCut: false, canCopy: false, canPaste: false, canSelectAll: true },
+          },
+        );
+
+        const { template } = yield* Deferred.await(popup);
+        const openInT3 = template.find((item) => item.label === "Open in T3");
+        assert.isDefined(openInT3);
+        assert.isUndefined(template.find((item) => item.label === "Open externally"));
+        assert.isDefined(template.find((item) => item.label === "Copy Link"));
+
+        openInT3?.click?.({} as Electron.MenuItem, fakeWindow.window, {} as Electron.KeyboardEvent);
+        yield* Effect.yieldNow;
+        assert.deepEqual(fakeWindow.send.mock.calls.at(-1), [
+          WEB_LINK_OPEN_CHANNEL,
+          "https://example.com/docs",
+        ]);
+        assert.deepEqual(openedExternalUrls, []);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect(
+    "offers Open externally in the native link context menu when Open links in is app",
+    () =>
+      Effect.gen(function* () {
+        const fakeWindow = makeFakeBrowserWindow();
+        const createCount = yield* Ref.make(0);
+        const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+        const popup = yield* Deferred.make<ElectronMenu.ElectronMenuTemplateInput>();
+        const openedExternalUrls: unknown[] = [];
+        const layer = layerTest({
+          window: fakeWindow.window,
+          createCount,
+          mainWindow,
+          clientSettings: Option.some({
+            ...DEFAULT_CLIENT_SETTINGS,
+            browserLinkTarget: "app",
+          }),
+          openedExternalUrls,
+          onPopupTemplate: (input) => Deferred.succeed(popup, input),
+        });
+
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+          const contextMenu = fakeWindow.webContentsListeners.get("context-menu");
+          if (!contextMenu) {
+            return yield* Effect.die("context-menu listener was not registered");
+          }
+          contextMenu(
+            { preventDefault: vi.fn() },
+            {
+              linkURL: "https://example.com/docs",
+              misspelledWord: "",
+              dictionarySuggestions: [],
+              mediaType: "none",
+              editFlags: { canCut: false, canCopy: false, canPaste: false, canSelectAll: true },
+            },
+          );
+
+          const { template } = yield* Deferred.await(popup);
+          const openExternally = template.find((item) => item.label === "Open externally");
+          assert.isDefined(openExternally);
+          assert.isUndefined(template.find((item) => item.label === "Open in T3"));
+          assert.isDefined(template.find((item) => item.label === "Copy Link"));
+
+          openExternally?.click?.(
+            {} as Electron.MenuItem,
+            fakeWindow.window,
+            {} as Electron.KeyboardEvent,
+          );
+          yield* Effect.yieldNow;
+          assert.deepEqual(openedExternalUrls, ["https://example.com/docs"]);
+        }).pipe(Effect.provide(layer));
+      }),
   );
 
   it.effect(

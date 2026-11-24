@@ -35,7 +35,8 @@ import { useFilesystemReadAccess } from "~/state/filesystem";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useFileContextMenuHandler } from "../fileContextMenu";
 import { type DraftId } from "../composerDraftStore";
-import { openDiffFilePrimaryAction } from "../diffFileActions";
+import { openDiffFilePrimaryAction, resolveDiffPathForWorkspace } from "../diffFileActions";
+import { useRightPanelStore } from "../rightPanelStore"; // fork: external open
 import { toolCallDiff } from "../lib/toolCallDiff";
 import { useCheckpointDiff, useTurnItemDetail } from "~/state/queries";
 import { revisionedQuery } from "~/state/revisionedQuery";
@@ -1695,6 +1696,22 @@ export default function DiffPanel({
                     if (!filePath) return;
                     event.preventDefault();
                     const repositoryFile = repositoryFileTarget(filePath);
+                    // fork: wire in-app T3 viewer callback for the alternate open menu entry.
+                    const inAppWorkspacePath =
+                      repositoryFile?.insideThreadFolder === false || routeThreadRef === null
+                        ? null
+                        : resolveDiffPathForWorkspace({
+                            filePath,
+                            workspaceRoot: activeCwd,
+                            repositoryRoot: repositoryFile ? undefined : diffPathRepositoryRoot,
+                          });
+                    const onOpenInApp =
+                      inAppWorkspacePath !== null && routeThreadRef !== null
+                        ? () =>
+                            useRightPanelStore
+                              .getState()
+                              .openFile(routeThreadRef, inAppWorkspacePath)
+                        : undefined;
                     onFileContextMenu(
                       repositoryFile?.cwd === undefined
                         ? {
@@ -1702,11 +1719,13 @@ export default function DiffPanel({
                             filePath,
                             workspaceRoot: activeCwd,
                             repositoryRoot: repositoryFile ? undefined : diffPathRepositoryRoot,
+                            onOpenInApp,
                           }
                         : {
                             environmentId: activeThread?.environmentId ?? null,
                             filePath: repositoryFile.path,
                             workspaceRoot: repositoryFile.cwd,
+                            onOpenInApp,
                           },
                       event,
                     );

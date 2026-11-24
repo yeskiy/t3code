@@ -88,6 +88,7 @@ export function useOpenChangeRequestLink(
   targetThreadRef?: ScopedThreadRef,
   targetEnvironmentId?: EnvironmentId,
   onCommitUnavailable?: () => void,
+  options?: { readonly forceInApp?: boolean }, // fork: external open
 ) => boolean {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -100,13 +101,14 @@ export function useOpenChangeRequestLink(
     refresh: true,
   });
   const openLink = useOpenLink(threadRef);
-  return (event, targetUrl, targetThreadRef, targetEnvironmentId, onCommitUnavailable) => {
-    if (!openInApp || shouldOpenPullRequestExternally(event)) return false;
+  return (event, targetUrl, targetThreadRef, targetEnvironmentId, onCommitUnavailable, options) => {
+    const forceInApp = options?.forceInApp === true;
+    if (!forceInApp && (!openInApp || shouldOpenPullRequestExternally(event))) return false;
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
     // fork: in the desktop app with "Open links in: System browser", open clicked PR/commit links externally.
     const openExternallyInDesktop =
-      onCommitUnavailable === undefined && !shouldForkInterceptInAppLink();
+      !forceInApp && onCommitUnavailable === undefined && !shouldForkInterceptInAppLink();
     const openInSystemBrowser = () => {
       void openLink(targetUrl, {
         event: { metaKey: event.metaKey, ctrlKey: event.ctrlKey, button: event.button },

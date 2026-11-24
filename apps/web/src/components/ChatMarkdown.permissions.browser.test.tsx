@@ -11,7 +11,8 @@ import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
-import { act, render } from "../../test/render";
+import { act, render, stubGlobal } from "../../test/render";
+import { FORK_OPEN_FILES_IN_KEY } from "../fork/externalOpen/externalOpen.logic";
 import { useRightPanelStore } from "../rightPanelStore";
 
 const state = vi.hoisted(() => ({
@@ -322,4 +323,61 @@ it("preserves keyboard activation of a file-options button", async () => {
   }
   await userEvent.click(button);
   await vi.waitFor(() => expect(state.choose.mock.lastCall?.[2]).toBe("mouse"));
+});
+
+it("offers Open in T3 or Open externally on MarkdownFileLink based on Open files in", async () => {
+  using _setup = setup();
+  const forkOpenPath = vi.fn(async () => ({ ok: true as const }));
+  using _bridge = stubGlobal("desktopBridge", { forkOpenPath });
+  const previousSetting = window.localStorage.getItem(FORK_OPEN_FILES_IN_KEY);
+  try {
+    window.localStorage.removeItem(FORK_OPEN_FILES_IN_KEY);
+    await using screen = await renderMarkdown("[Readme](docs/readme.md)");
+
+    // Default setting ("external"): plain click opens externally, menu offers Open in T3.
+    state.choose.mockResolvedValueOnce("fork-open-in-t3");
+    await screen.openContextMenu();
+    expect(offeredActions()).toEqual([
+      "fork-open-in-t3",
+      "open",
+      "reveal",
+      "copy-relative",
+      "copy-full",
+    ]);
+    expect(state.choose.mock.lastCall?.[0][0]).toMatchObject({
+      id: "fork-open-in-t3",
+      label: "Open in T3",
+    });
+    await vi.waitFor(() =>
+      expect(state.openFile).toHaveBeenCalledWith(threadRef, "docs/readme.md", undefined),
+    );
+    expect(forkOpenPath).not.toHaveBeenCalled();
+
+    // Setting "app": plain click opens in T3, keyboard/mouse context menu offers Open externally.
+    window.localStorage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+    state.choose.mockResolvedValueOnce("fork-open-external");
+    screen.anchor().focus();
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    await vi.waitFor(() => expect(offeredActions()).toContain("fork-open-external"));
+    expect(offeredActions()).toEqual([
+      "fork-open-external",
+      "open",
+      "reveal",
+      "copy-relative",
+      "copy-full",
+    ]);
+    expect(state.choose.mock.lastCall?.[0][0]).toMatchObject({
+      id: "fork-open-external",
+      label: "Open externally",
+    });
+    await vi.waitFor(() =>
+      expect(forkOpenPath).toHaveBeenCalledWith({
+        environmentId: threadRef.environmentId,
+        path: "/work/docs/readme.md",
+      }),
+    );
+  } finally {
+    if (previousSetting === null) window.localStorage.removeItem(FORK_OPEN_FILES_IN_KEY);
+    else window.localStorage.setItem(FORK_OPEN_FILES_IN_KEY, previousSetting);
+  }
 });

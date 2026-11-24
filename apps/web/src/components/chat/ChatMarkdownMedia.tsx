@@ -235,6 +235,29 @@ export function ChatMarkdownImage(props: {
       ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
     });
   };
+  // fork: allow web URL and outside-workspace local images to offer "Open in T3" (lightbox) in their context menu.
+  const mediaActionsSource: MediaActionSource =
+    props.onImageExpand &&
+    props.actionsSource.onOpenFile === undefined &&
+    props.actionsSource.onOpenInApp === undefined &&
+    (props.actionsSource.reference?.kind === "url" ||
+      props.actionsSource.reference?.kind === "file")
+      ? {
+          ...props.actionsSource,
+          onOpenInApp: () =>
+            props.onImageExpand?.({
+              images: [
+                {
+                  src,
+                  name: props.alt.trim() || "image",
+                  actionsSource: props.actionsSource,
+                  ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
+                },
+              ],
+              index: 0,
+            }),
+        }
+      : props.actionsSource;
   const imageEvents = (loadingSrc: string) => ({
     onLoad: () => {
       setLoadedSrc(loadingSrc);
@@ -248,7 +271,7 @@ export function ChatMarkdownImage(props: {
 
   if (settled) {
     return (
-      <MediaActions source={props.actionsSource}>
+      <MediaActions source={mediaActionsSource}>
         <img
           {...props.imageProps}
           ref={markLoadedIfComplete}
@@ -264,7 +287,7 @@ export function ChatMarkdownImage(props: {
             props.onImageExpand && "cursor-zoom-in",
           )}
           style={props.style}
-          {...expandableMarkdownImageProps(props.onImageExpand, props.alt, m, props.actionsSource)}
+          {...expandableMarkdownImageProps(props.onImageExpand, props.alt, m, mediaActionsSource)}
           {...imageEvents(src)}
         />
       </MediaActions>
@@ -405,16 +428,9 @@ export function assetMediaActionsSource(input: {
     ...(relativePath && (resource._tag === "media-file" || resource._tag === "workspace-file")
       ? {
           onOpenFile: () =>
-            // fork: open media file in OS default app when configured.
-            void openForkFileOrFallback({
-              environmentId,
-              path: path ?? relativePath,
-              cwd: input.workspaceRoot,
-              fallback: () =>
-                useRightPanelStore
-                  .getState()
-                  .openFile({ environmentId, threadId: resource.threadId }, relativePath),
-            }),
+            useRightPanelStore
+              .getState()
+              .openFile({ environmentId, threadId: resource.threadId }, relativePath),
         }
       : {}),
   };

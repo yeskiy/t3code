@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   download: vi.fn(),
   png: vi.fn(),
   showMenu: vi.fn(),
+  openExternal: vi.fn(),
   openFile: vi.fn(),
   clipboard: vi.fn(),
   copyText: vi.fn(),
@@ -36,7 +37,10 @@ vi.mock("react", async (importOriginal) => ({
 }));
 vi.mock("../../hooks/useCopyToClipboard", () => ({ writeTextToClipboard: state.copyText }));
 vi.mock("../../localApi", () => ({
-  readLocalApi: () => ({ contextMenu: { show: state.showMenu } }),
+  readLocalApi: () => ({
+    contextMenu: { show: state.showMenu },
+    shell: { openExternal: state.openExternal },
+  }),
 }));
 vi.mock("../../state/assets", () => ({ assetEnvironment: { createUrl: {} } }));
 vi.mock("../../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => state.mint }));
@@ -52,8 +56,9 @@ vi.mock("../../state/query", () => ({
 }));
 vi.mock("../../rpc/atomRegistry", () => ({
   appAtomRegistry: {
-    get: (environmentId: string) => {
-      const session = state.sessions.get(environmentId);
+    get: (atom: unknown) => {
+      if (typeof atom !== "string") return null;
+      const session = state.sessions.get(atom);
       return session === undefined ? AsyncResult.initial() : AsyncResult.success(session);
     },
   },
@@ -75,6 +80,10 @@ vi.mock("../ui/toast", () => ({
   },
 }));
 
+import {
+  FORK_OPEN_FILES_IN_KEY,
+  FORK_OPEN_LINKS_IN_KEY,
+} from "../../fork/externalOpen/externalOpen.logic";
 import { MediaActions, useMediaActions, type MediaActionSource } from "./MediaActions";
 
 const environmentId = EnvironmentId.make("media-environment");
@@ -127,6 +136,7 @@ beforeEach(() => {
   state.download.mockReset().mockResolvedValue(undefined);
   state.png.mockReset().mockResolvedValue(new Blob(["png"], { type: "image/png" }));
   state.showMenu.mockReset().mockResolvedValue(null);
+  state.openExternal.mockReset().mockResolvedValue(undefined);
   state.openFile.mockReset();
   state.copyText.mockReset().mockResolvedValue(true);
   state.menuFinished = null;
@@ -184,3 +194,154 @@ it.each(["save", "copy-image", "open-file"])(
     expect(state.openFile).not.toHaveBeenCalled();
   },
 );
+
+function createMemoryStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    get length() {
+      return store.size;
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+  };
+}
+
+it("offers Open in T3 when Open files in is external and Open externally when set to app", async () => {
+  state.sessions.set(environmentId, granted);
+  const storage = createMemoryStorage();
+  const forkOpenPath = vi.fn(async () => ({ ok: true as const }));
+  vi.stubGlobal("window", {
+    localStorage: storage,
+    desktopBridge: { forkOpenPath },
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  });
+
+  state.showMenu.mockResolvedValueOnce("open-file");
+  openMenu(hostSource());
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([expect.objectContaining({ id: "open-file", label: "Open in T3" })]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() => expect(state.openFile).toHaveBeenCalledTimes(1));
+  expect(forkOpenPath).not.toHaveBeenCalled();
+
+  storage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+  state.showMenu.mockResolvedValueOnce("fork-open-external");
+  openMenu(hostSource());
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "fork-open-external", label: "Open externally" }),
+    ]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() =>
+    expect(forkOpenPath).toHaveBeenCalledWith({ environmentId, path: "/repo/image.png" }),
+  );
+});
+
+it("offers Open in T3 or Open externally for web URL media based on Open links in", async () => {
+  const storage = createMemoryStorage();
+  vi.stubGlobal("window", {
+    localStorage: storage,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  });
+  const onOpenInApp = vi.fn();
+  const webSource: MediaActionSource = {
+    kind: "image",
+    name: "photo.png",
+    src: "https://example.com/photo.png",
+    reference: { kind: "url", url: "https://example.com/photo.png" },
+    onOpenInApp,
+  };
+
+  state.showMenu.mockResolvedValueOnce("fork-open-in-t3");
+  openMenu(webSource);
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "fork-open-in-t3", label: "Open in T3" }),
+    ]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() => expect(onOpenInApp).toHaveBeenCalledTimes(1));
+
+  storage.setItem(FORK_OPEN_LINKS_IN_KEY, JSON.stringify("app"));
+  state.showMenu.mockResolvedValueOnce("fork-open-external");
+  openMenu(webSource);
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "fork-open-external", label: "Open externally" }),
+    ]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() =>
+    expect(state.openExternal).toHaveBeenCalledWith("https://example.com/photo.png"),
+  );
+});
+
+it("offers Open in T3 (lightbox) or Open externally for outside-workspace local images", async () => {
+  state.sessions.set(environmentId, granted);
+  const storage = createMemoryStorage();
+  const forkOpenPath = vi.fn(async () => ({ ok: true as const }));
+  vi.stubGlobal("window", {
+    localStorage: storage,
+    desktopBridge: { forkOpenPath },
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  });
+  const onOpenInApp = vi.fn();
+  const externalLocalSource: MediaActionSource = {
+    kind: "image",
+    name: "shot.png",
+    src: "http://host/assets/shot.png",
+    reference: { kind: "file", path: "/tmp/shot.png" },
+    asset: {
+      environmentId,
+      resource: {
+        _tag: "media-file",
+        threadId: ThreadId.make("thread-1"),
+        path: "/tmp/shot.png",
+      },
+    },
+    onOpenInApp,
+  };
+
+  state.showMenu.mockResolvedValueOnce("fork-open-in-t3");
+  openMenu(externalLocalSource);
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "fork-open-in-t3", label: "Open in T3", disabled: false }),
+    ]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() => expect(onOpenInApp).toHaveBeenCalledTimes(1));
+  expect(forkOpenPath).not.toHaveBeenCalled();
+
+  storage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+  state.showMenu.mockResolvedValueOnce("fork-open-external");
+  openMenu(externalLocalSource);
+  expect(state.showMenu).toHaveBeenLastCalledWith(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "fork-open-external",
+        label: "Open externally",
+        disabled: false,
+      }),
+    ]),
+    { x: 1, y: 1 },
+  );
+  await vi.waitFor(() =>
+    expect(forkOpenPath).toHaveBeenCalledWith({ environmentId, path: "/tmp/shot.png" }),
+  );
+});

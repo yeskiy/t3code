@@ -213,6 +213,7 @@ import { resolveLinkTarget } from "../browser/browserLinkTarget";
 // fork: external open helpers for links and local files
 import { isMailtoUrl } from "../fork/externalOpen/externalOpen.logic";
 import {
+  openForkFileDirect,
   openForkFileOrFallback,
   shouldForkInterceptInAppLink,
   shouldForkOpenLocalFile,
@@ -630,14 +631,7 @@ function useChatMarkdownState({
         environmentId === null ? undefined : readPreparedConnection(environmentId)?.httpBaseUrl,
       createAssetUrl,
       onOpenFile: threadRef
-        ? (path) =>
-            // fork: open local media files in OS default app when configured.
-            void openForkFileOrFallback({
-              environmentId: threadRef.environmentId,
-              path,
-              cwd,
-              fallback: () => useRightPanelStore.getState().openFile(threadRef, path),
-            })
+        ? (path) => useRightPanelStore.getState().openFile(threadRef, path)
         : undefined,
     }).then(
       (preview) => {
@@ -1042,6 +1036,20 @@ function useChatMarkdownState({
             }),
           );
         }}
+        // fork: direct external open for the "Open externally" context menu entry.
+        onOpenExternalFileDirect={
+          isAppBundle
+            ? undefined
+            : () => {
+                void resolveHostPath().then(({ absolutePath }) =>
+                  openForkFileDirect({
+                    environmentId,
+                    path: absolutePath,
+                    cwd,
+                  }),
+                );
+              }
+        }
         onOpenMedia={
           threadRef && canPreviewMedia
             ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)

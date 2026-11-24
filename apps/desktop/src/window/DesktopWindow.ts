@@ -29,8 +29,10 @@ import {
   SNAP_SHOT_EVENT_CHANNEL,
   TRACKPAD_SCROLL_BEGIN_CHANNEL,
   TRACKPAD_SCROLL_END_CHANNEL,
+  WEB_LINK_OPEN_CHANNEL,
   WINDOW_FULLSCREEN_STATE_CHANNEL,
 } from "../ipc/channels.ts";
+import { resolveDesktopLinkContextMenuEntry } from "../fork/externalOpen/linkContextMenu.logic.ts"; // fork: external open
 import {
   PASSKEY_BRIDGE_ARGUMENT,
   PRIMARY_PASTE_DISABLED_ARGUMENT,
@@ -689,80 +691,125 @@ export const make = Effect.gen(function* () {
           menuTemplate.push({ type: "separator" });
         }
 
-        // fork: skip Copy Link when Copy Email Address handles mailto links.
+        // fork: skip Copy Link when Copy Email Address handles mailto links, and add the alternate open entry for http(s) links.
         const mailtoAddress = parseMailtoAddress(params.linkURL);
-        if (
+        const safeExternalLink =
           Option.isNone(mailtoAddress) &&
-          Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))
-        ) {
+          Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL));
+
+        const buildAndPopupContextMenu = Effect.gen(function* () {
+          if (safeExternalLink) {
+            const browserLinkTarget = yield* clientSettings.get.pipe(
+              Effect.map(
+                Option.match({
+                  onNone: () => DEFAULT_CLIENT_SETTINGS.browserLinkTarget,
+                  onSome: (settings) => settings.browserLinkTarget,
+                }),
+              ),
+              Effect.orElseSucceed(() => DEFAULT_CLIENT_SETTINGS.browserLinkTarget),
+            );
+            const forkLinkEntry = resolveDesktopLinkContextMenuEntry({
+              url: params.linkURL,
+              setting: browserLinkTarget,
+            });
+            if (forkLinkEntry !== null) {
+              menuTemplate.push({
+                label: forkLinkEntry.label,
+                click: () => {
+                  if (forkLinkEntry.action === "external") {
+                    void runPromise(electronShell.openExternal(forkLinkEntry.url));
+                    return;
+                  }
+                  void runPromise(
+                    electronWindow.main.pipe(
+                      Effect.map((main) => (Option.isSome(main) ? main.value : ownerWindow)),
+                      Effect.tap((targetWindow) =>
+                        Effect.sync(() => {
+                          if (
+                            !targetWindow.isDestroyed() &&
+                            !targetWindow.webContents.isDestroyed()
+                          ) {
+                            targetWindow.webContents.send(WEB_LINK_OPEN_CHANNEL, forkLinkEntry.url);
+                          }
+                        }),
+                      ),
+                    ),
+                  );
+                },
+              });
+            }
+            menuTemplate.push(
+              {
+                label: m(msg("Copy Link")),
+                click: () => {
+                  void runPromise(electronShell.copyText(params.linkURL));
+                },
+              },
+              { type: "separator" },
+            );
+          }
+
+          if (Option.isSome(mailtoAddress)) {
+            menuTemplate.push(
+              {
+                label: m(msg("Copy Email Address")),
+                click: () => {
+                  void runPromise(electronShell.copyText(mailtoAddress.value));
+                },
+              },
+              { type: "separator" },
+            );
+          }
+
+          if (params.mediaType === "image") {
+            menuTemplate.push({
+              label: m(msg("Copy Image")),
+              click: () => {
+                void runPromise(
+                  Effect.tryPromise({
+                    try: () => copyContextMenuImage(contents, params),
+                    catch: (cause) => new ContextMenuImageCopyError({ cause }),
+                  }).pipe(
+                    Effect.catch(() => logWindowWarning("failed to copy context-menu image")),
+                  ),
+                );
+              },
+            });
+            menuTemplate.push({ type: "separator" });
+          }
+
           menuTemplate.push(
             {
-              label: m(msg("Copy Link")),
-              click: () => {
-                void runPromise(electronShell.copyText(params.linkURL));
-              },
+              role: "cut",
+              label: m(msg("Cut", { $context: "Edit menu item" })),
+              enabled: params.editFlags.canCut,
             },
-            { type: "separator" },
-          );
-        }
-
-        if (Option.isSome(mailtoAddress)) {
-          menuTemplate.push(
             {
-              label: m(msg("Copy Email Address")),
-              click: () => {
-                void runPromise(electronShell.copyText(mailtoAddress.value));
-              },
+              role: "copy",
+              label: m(msg("Copy", { $context: "Edit menu item" })),
+              enabled: params.editFlags.canCopy,
             },
-            { type: "separator" },
+            {
+              role: "paste",
+              label: m(msg("Paste", { $context: "Edit menu item" })),
+              enabled: params.editFlags.canPaste,
+            },
+            {
+              role: "selectAll",
+              label: m(msg("Select All", { $context: "Edit menu item" })),
+              enabled: params.editFlags.canSelectAll,
+            },
           );
-        }
 
-        if (params.mediaType === "image") {
-          menuTemplate.push({
-            label: m(msg("Copy Image")),
-            click: () => {
-              void runPromise(
-                Effect.tryPromise({
-                  try: () => copyContextMenuImage(contents, params),
-                  catch: (cause) => new ContextMenuImageCopyError({ cause }),
-                }).pipe(Effect.catch(() => logWindowWarning("failed to copy context-menu image"))),
-              );
-            },
-          });
-          menuTemplate.push({ type: "separator" });
-        }
-
-        menuTemplate.push(
-          {
-            role: "cut",
-            label: m(msg("Cut", { $context: "Edit menu item" })),
-            enabled: params.editFlags.canCut,
-          },
-          {
-            role: "copy",
-            label: m(msg("Copy", { $context: "Edit menu item" })),
-            enabled: params.editFlags.canCopy,
-          },
-          {
-            role: "paste",
-            label: m(msg("Paste", { $context: "Edit menu item" })),
-            enabled: params.editFlags.canPaste,
-          },
-          {
-            role: "selectAll",
-            label: m(msg("Select All", { $context: "Edit menu item" })),
-            enabled: params.editFlags.canSelectAll,
-          },
-        );
-
-        void runPromise(
-          electronMenu.popupTemplate({
+          if (contents.isDestroyed() || ownerWindow.isDestroyed()) return;
+          yield* electronMenu.popupTemplate({
             window: ownerWindow,
             template: menuTemplate,
             ...(params.frame ? { frame: params.frame } : {}),
-          }),
-        );
+          });
+        });
+
+        void runPromise(buildAndPopupContextMenu);
       });
       contents.on("did-create-window", (popup) => {
         installContextMenu(popup, popup.webContents, isBrowserContents);

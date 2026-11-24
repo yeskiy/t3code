@@ -11,6 +11,8 @@ import {
   revealInFileExplorerLabelForOs,
 } from "~/components/preview/fileExplorerLabel";
 import { readLocalApi } from "./localApi";
+import { type ForkAlternateOpenMenuEntry } from "./fork/externalOpen/externalOpen.logic"; // fork: external open
+import { openForkFileDirect, resolveForkFileMenuEntry } from "./fork/externalOpen/forkExternalOpen"; // fork: external open
 import { serverEnvironment } from "./state/server";
 import { shellEnvironment } from "./state/shell";
 import { useAtomCommand } from "./state/use-atom-command";
@@ -24,6 +26,8 @@ import type { MessageResolver } from "./i18n/messages";
 export type FileContextMenuAction =
   | "reveal-in-folder"
   | "open"
+  | "fork-open-in-t3"
+  | "fork-open-external"
   /** Submenu parent; never the activated id. */
   | "open-with"
   | `editor:${EditorId}`;
@@ -34,6 +38,9 @@ export interface FileContextMenuTarget {
   readonly filePath: string;
   readonly workspaceRoot: string | undefined;
   readonly repositoryRoot?: string | undefined;
+  // fork: allow local file menus to offer "Open in T3" / "Open externally" for files.
+  readonly isDirectory?: boolean | undefined;
+  readonly onOpenInApp?: (() => void) | undefined;
 }
 
 export function resolveFileContextMenuAbsolutePath(target: FileContextMenuTarget): string | null {
@@ -59,14 +66,23 @@ export interface FileContextMenuCapabilities {
   readonly editorIds: ReadonlyArray<EditorId>;
 }
 
-function buildFileContextMenuItems(input: {
+export function buildFileContextMenuItems(input: {
   readonly hasAbsolutePath: boolean;
   readonly capabilities: FileContextMenuCapabilities;
   readonly resolve: MessageResolver;
+  readonly forkOpenEntry?: ForkAlternateOpenMenuEntry | null;
 }): readonly ContextMenuItem<FileContextMenuAction>[] {
   if (!input.hasAbsolutePath) return [];
   const items: ContextMenuItem<FileContextMenuAction>[] = [];
-  if (input.capabilities.canOpenDefault) {
+  // fork: replace upstream "Open" with the single alternate open entry on local desktop hosts.
+  const forkOpenEntry = input.forkOpenEntry ?? null;
+  if (forkOpenEntry !== null) {
+    items.push({
+      id: forkOpenEntry.action === "app" ? "fork-open-in-t3" : "fork-open-external",
+      label: forkOpenEntry.label,
+      icon: "pencil",
+    });
+  } else if (input.capabilities.canOpenDefault) {
     items.push({
       id: "open",
       label: input.resolve(msg("Open", { $context: "verb, opens a file" })),
@@ -114,12 +130,30 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
     editorIds: availableEditors,
   };
 
+  const resolveTargetForkOpenEntry = (
+    target: FileContextMenuTarget,
+  ): ForkAlternateOpenMenuEntry | null =>
+    target.isDirectory === true
+      ? null
+      : resolveForkFileMenuEntry({
+          environmentId: target.environmentId,
+          canOpenInApp: target.onOpenInApp !== undefined,
+        });
+
   const activate = async (
     action: FileContextMenuAction,
     target: FileContextMenuTarget,
   ): Promise<void> => {
+    if (action === "fork-open-in-t3") {
+      target.onOpenInApp?.();
+      return;
+    }
     const absolutePath = resolveFileContextMenuAbsolutePath(target);
     if (absolutePath === null || environmentId === null) return;
+    if (action === "fork-open-external") {
+      await openForkFileDirect({ environmentId, path: absolutePath });
+      return;
+    }
 
     const reveal = action === "reveal-in-folder";
     const editor =
@@ -158,6 +192,7 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
       hasAbsolutePath: resolveFileContextMenuAbsolutePath(target) !== null,
       capabilities,
       resolve,
+      forkOpenEntry: resolveTargetForkOpenEntry(target),
     });
     if (items.length === 0 || api === undefined) return;
     const clicked = await api.contextMenu.show(items, position);
@@ -171,6 +206,7 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
         hasAbsolutePath: resolveFileContextMenuAbsolutePath(target) !== null,
         capabilities,
         resolve,
+        forkOpenEntry: resolveTargetForkOpenEntry(target),
       }),
     capabilities,
     activate,

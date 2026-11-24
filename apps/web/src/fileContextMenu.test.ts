@@ -1,7 +1,8 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveFileContextMenuAbsolutePath } from "./fileContextMenu";
+import { m } from "./i18n/messages";
+import { buildFileContextMenuItems, resolveFileContextMenuAbsolutePath } from "./fileContextMenu";
 
 const BASE_TARGET = {
   environmentId: EnvironmentId.make("environment-local"),
@@ -40,5 +41,59 @@ describe("resolveFileContextMenuAbsolutePath", () => {
         filePath: "/absolute/src/index.ts",
       }),
     ).toBeNull();
+  });
+});
+
+describe("buildFileContextMenuItems", () => {
+  const resolve = m;
+  const capabilities = {
+    revealLabel: "Reveal in File Explorer",
+    canOpenDefault: true,
+    editorIds: ["file-manager", "cursor", "vscode"] as const,
+  };
+
+  it("replaces upstream Open with Open in T3 when the fork alternate action is app", () => {
+    const items = buildFileContextMenuItems({
+      hasAbsolutePath: true,
+      capabilities,
+      resolve,
+      forkOpenEntry: { action: "app", label: "Open in T3" },
+    });
+
+    expect(items.map((item) => [item.id, item.label])).toEqual([
+      ["fork-open-in-t3", "Open in T3"],
+      ["reveal-in-folder", "Reveal in File Explorer"],
+      ["open-with", "Open with"],
+    ]);
+  });
+
+  it("replaces upstream Open with Open externally when the fork alternate action is external", () => {
+    const items = buildFileContextMenuItems({
+      hasAbsolutePath: true,
+      capabilities,
+      resolve,
+      forkOpenEntry: { action: "external", label: "Open externally" },
+    });
+
+    expect(items.map((item) => [item.id, item.label])).toEqual([
+      ["fork-open-external", "Open externally"],
+      ["reveal-in-folder", "Reveal in File Explorer"],
+      ["open-with", "Open with"],
+    ]);
+  });
+
+  it("keeps the upstream Open entry when forkOpenEntry is null (remote host or directory)", () => {
+    const items = buildFileContextMenuItems({
+      hasAbsolutePath: true,
+      capabilities,
+      resolve,
+      forkOpenEntry: null,
+    });
+
+    expect(items.map((item) => [item.id, item.label])).toEqual([
+      ["open", "Open"],
+      ["reveal-in-folder", "Reveal in File Explorer"],
+      ["open-with", "Open with"],
+    ]);
   });
 });

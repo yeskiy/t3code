@@ -7,6 +7,8 @@ import {
   FORK_OPEN_LINKS_IN_KEY,
   isMailtoUrl,
   isSafeExternalBrowserUrl,
+  isSafeHttpBrowserUrl,
+  resolveForkAlternateOpenMenuEntry,
   resolveForkFileAction,
   resolveForkLinkAction,
   resolveLocalFileAbsolutePath,
@@ -166,6 +168,142 @@ describe("externalOpen.logic", () => {
       { path: "C:\\bad\0path.txt", cwd: "E:\\Projects\\repo" },
     ])("rejects invalid path $path", ({ path, cwd }) => {
       expect(resolveLocalFileAbsolutePath({ path, cwd })).toBeNull();
+    });
+  });
+
+  describe("isSafeHttpBrowserUrl", () => {
+    it.each(["http://localhost:3000/app", "https://example.com/docs?q=1#top"])(
+      "allows %s",
+      (url) => {
+        expect(isSafeHttpBrowserUrl(url)).toBe(true);
+      },
+    );
+
+    it.each([
+      "",
+      "mailto:owner@example.com",
+      "file:///C:/Users/owner/index.html",
+      "javascript:alert(1)",
+      "https://example.com/bad\nurl",
+    ])("rejects %s", (url) => {
+      expect(isSafeHttpBrowserUrl(url)).toBe(false);
+    });
+  });
+
+  describe("resolveForkAlternateOpenMenuEntry", () => {
+    it.each([
+      {
+        name: "file + external setting + local host + in-app viewer -> Open in T3",
+        input: {
+          kind: "file" as const,
+          setting: "external" as const,
+          canOpenLocally: true,
+          canOpenInApp: true,
+        },
+        expected: { action: "app", label: "Open in T3" },
+      },
+      {
+        name: "file + app setting + local host + in-app viewer -> Open externally",
+        input: {
+          kind: "file" as const,
+          setting: "app" as const,
+          canOpenLocally: true,
+          canOpenInApp: true,
+        },
+        expected: { action: "external", label: "Open externally" },
+      },
+      {
+        name: "file + app setting + local host + no in-app viewer -> Open externally",
+        input: {
+          kind: "file" as const,
+          setting: "app" as const,
+          canOpenLocally: true,
+          canOpenInApp: false,
+        },
+        expected: { action: "external", label: "Open externally" },
+      },
+      {
+        name: "file + external setting + local host + no in-app viewer -> null",
+        input: {
+          kind: "file" as const,
+          setting: "external" as const,
+          canOpenLocally: true,
+          canOpenInApp: false,
+        },
+        expected: null,
+      },
+      {
+        name: "file + remote environment (no local host) + external setting -> null",
+        input: {
+          kind: "file" as const,
+          setting: "external" as const,
+          canOpenLocally: false,
+          canOpenInApp: true,
+        },
+        expected: null,
+      },
+      {
+        name: "file + remote environment (no local host) + app setting -> null",
+        input: {
+          kind: "file" as const,
+          setting: "app" as const,
+          canOpenLocally: false,
+          canOpenInApp: true,
+        },
+        expected: null,
+      },
+      {
+        name: "link + system setting + can open externally + in-app browser -> Open in T3",
+        input: {
+          kind: "link" as const,
+          setting: "system" as const,
+          canOpenExternally: true,
+          canOpenInApp: true,
+        },
+        expected: { action: "app", label: "Open in T3" },
+      },
+      {
+        name: "link + app setting + can open externally + in-app browser -> Open externally",
+        input: {
+          kind: "link" as const,
+          setting: "app" as const,
+          canOpenExternally: true,
+          canOpenInApp: true,
+        },
+        expected: { action: "external", label: "Open externally" },
+      },
+      {
+        name: "link + system setting + no in-app browser -> null",
+        input: {
+          kind: "link" as const,
+          setting: "system" as const,
+          canOpenExternally: true,
+          canOpenInApp: false,
+        },
+        expected: null,
+      },
+      {
+        name: "link + app setting + no in-app browser -> Open externally",
+        input: {
+          kind: "link" as const,
+          setting: "app" as const,
+          canOpenExternally: true,
+          canOpenInApp: false,
+        },
+        expected: { action: "external", label: "Open externally" },
+      },
+      {
+        name: "link + unsafe url (cannot open externally) -> null",
+        input: {
+          kind: "link" as const,
+          setting: "app" as const,
+          canOpenExternally: false,
+          canOpenInApp: true,
+        },
+        expected: null,
+      },
+    ])("$name", ({ input, expected }) => {
+      expect(resolveForkAlternateOpenMenuEntry(input)).toEqual(expected);
     });
   });
 });
