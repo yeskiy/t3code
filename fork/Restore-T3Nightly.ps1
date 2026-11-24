@@ -617,7 +617,8 @@ function Start-RestoredNightly {
   }
 
   Write-Host "  Launching $exePath..."
-  Start-Process -FilePath $exePath -WorkingDirectory $TargetInstallDir | Out-Null
+  # Explorer starts the app without this console, so closing the window does not stop it.
+  Start-Process -FilePath (Join-Path $env:WINDIR 'explorer.exe') -ArgumentList "`"$exePath`"" | Out-Null
 
   $deadline = (Get-Date).AddSeconds(120)
   while ((Get-Date) -lt $deadline) {
