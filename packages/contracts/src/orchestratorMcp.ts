@@ -44,6 +44,8 @@ import {
 } from "./orchestrationV2.ts";
 import { ProviderOptionSelection, ProviderOptionSelectionValue } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+// fork: agent definitions
+import { ForkAgentSummary, ForkDelegateTaskAgentField } from "./forkDelegationAgent.ts";
 
 const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000));
 const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512));
@@ -176,6 +178,8 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   ),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
+  // fork: agent definitions
+  agent: ForkDelegateTaskAgentField,
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
@@ -708,6 +712,8 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  // fork: agent definitions
+  agents: Schema.optional(Schema.Array(ForkAgentSummary)),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,

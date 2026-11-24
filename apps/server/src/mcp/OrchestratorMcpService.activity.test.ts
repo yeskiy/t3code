@@ -39,10 +39,14 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import type * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  // fork: agent definitions
+  Layer.provide(forkDelegationAgentsLayerEmpty),
 );
 
 const environmentId = EnvironmentId.make("environment-mcp-orchestrator-detail");

@@ -97,4 +97,34 @@ describe("T3 device instructions", () => {
     );
     assert.notInclude(t3AcpPromptWithInstructions({ prompt: "Hi.", state }), "## T3 Code devices");
   });
+
+  it("includes fork agent instructions in ACP prompts and re-delivers on change", () => {
+    const agentText = "## T3 agent: researcher\n\nInspect the codebase.";
+    const state = {
+      interactionMode: "default",
+      hasT3Mcp: true,
+      hasDeviceTools: false,
+      forkAgentInstructions: agentText,
+    } as const;
+    const first = t3AcpPromptWithInstructions({ prompt: "Find callers.", state });
+    assert.include(first, agentText);
+    assert.isAbove(first.indexOf(agentText), first.indexOf("ACP fallback:"));
+    assert.equal(
+      t3AcpPromptWithInstructions({ prompt: "Follow up.", state, previousState: state }),
+      "Follow up.",
+    );
+    const withoutAgent = {
+      interactionMode: "default",
+      hasT3Mcp: true,
+      hasDeviceTools: false,
+    } as const;
+    assert.include(
+      t3AcpPromptWithInstructions({
+        prompt: "Now with agent.",
+        state,
+        previousState: withoutAgent,
+      }),
+      agentText,
+    );
+  });
 });

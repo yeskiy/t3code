@@ -44,6 +44,8 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 
 const driver = ProviderDriverKind.make("claudeAgent");
 const instanceId = ProviderInstanceId.make("claudeAgent");
@@ -175,6 +177,8 @@ it.effect.each([
         OrchestratorMcpService.layer.pipe(
           Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
           Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          // fork: agent definitions
+          Layer.provide(forkDelegationAgentsLayerEmpty),
         ),
         layerRecovery,
       ).pipe(

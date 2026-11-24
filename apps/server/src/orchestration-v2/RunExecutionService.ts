@@ -44,6 +44,8 @@ import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ForkStopScope from "../fork/ForkStopScope.ts"; // fork: turn-scoped Stop
+// fork: agent definitions
+import { ForkDelegationAgents } from "../fork/delegationAgents/ForkDelegationAgents.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -715,6 +717,8 @@ export const layer: Layer.Layer<
   | PreviewAgentActivity.PreviewAgentActivity
   | TurnItemPositionStore.TurnItemPositionStoreV2
   | ThreadCommandExecutor.ThreadCommandExecutor
+  // fork: agent definitions
+  | ForkDelegationAgents
 > = Layer.effect(
   RunExecutionServiceV2,
   Effect.gen(function* () {
@@ -725,6 +729,8 @@ export const layer: Layer.Layer<
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const mcpAppModelContext = yield* McpAppModelContext.McpAppModelContext;
+    // fork: agent definitions
+    const forkAgents = yield* ForkDelegationAgents;
     const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
@@ -2307,6 +2313,14 @@ export const layer: Layer.Layer<
           mcpAppModelContext,
           input.run.threadId,
         );
+        // fork: agent text for delegated children; a broken definition only logs
+        const forkAgent = yield* forkAgents
+          .forThread(input.run.threadId)
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("fork agent not loaded", { cause }).pipe(Effect.as(undefined)),
+            ),
+          );
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,
@@ -2328,6 +2342,8 @@ export const layer: Layer.Layer<
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
           ...(appContext.length === 0 ? {} : { appContext }),
+          // fork: agent definitions
+          ...(forkAgent === undefined ? {} : { forkAgent }),
         };
         // Check after the context read: ingestion can settle the run while
         // it awaits. A failed ownership read fails the start below.

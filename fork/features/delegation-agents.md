@@ -69,7 +69,19 @@ Child thread to agent mappings are stored in `<stateDir>\fork\delegation-agents.
 
 ## Hook points
 
-Task 5 fills in the upstream hook points when wiring `ForkDelegationAgents` into `OrchestratorMcpService`, `RunExecutionService`, `runtimeLayer`, and the provider adapters.
+| Upstream file                                                    | Hook                                                                                                                                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/contracts/src/index.ts`                                | Re-export `forkDelegationAgent.ts`                                                                                                                           |
+| `packages/contracts/src/orchestratorMcp.ts`                      | `agent` on `OrchestratorMcpDelegateTaskInput`, `agents` on `OrchestratorMcpCapabilitiesResult`                                                               |
+| `packages/provider-core/src/server/ProviderAdapter.ts`           | `forkAgent` on `ProviderAdapterV2TurnInput`                                                                                                                  |
+| `packages/provider-core/src/server/orchestrationInstructions.ts` | `forkAgentInstructions` on `T3AcpInstructionState` and `t3AcpPromptWithInstructions`                                                                         |
+| `packages/provider-acp/src/server/adapter.ts`                    | Pass `turnInput.forkAgent.instructions` into `instructionState`                                                                                              |
+| `apps/server/src/mcp/OrchestratorMcpService.ts`                  | List `agents` in `capabilities`, enforce `no-delegation` on local and remote `delegateTask`, resolve agent and defaults, record child thread before dispatch |
+| `apps/server/src/orchestration-v2/RunExecutionService.ts`        | Load `forkAgent` for the run's thread and attach to `turnInput` (log and skip on broken definition)                                                          |
+| `apps/server/src/orchestration-v2/runtimeLayer.ts`               | Provide `ForkDelegationAgents.layer` to `RunExecutionService` and expose it from `layer` so `OrchestratorMcpService` shares the same memoized instance       |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`   | Pass `forkClaudeAgentParts(turnInput.forkAgent)` into `forkClaudeLaunch.resolve`                                                                             |
+| `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`    | Spread `forkCodexAgentContext(input.forkAgent)` into `additionalContext` and pass `turnInput.forkAgent` in `startNativeTurn`                                 |
+| `apps/server/src/provider/agentContextBudget.json`               | Account for the `agent` field on `delegate_task` (+26 bytes)                                                                                                 |
 
 ## Turn off
 

@@ -142,6 +142,14 @@ import { WITHHELD, withoutWebhookUrlToken } from "../scheduledTasks/webhookUrlTo
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
+// fork: agent definitions
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { ForkDelegationAgents } from "../fork/delegationAgents/ForkDelegationAgents.ts";
+import {
+  forkAgentsCapability,
+  forkAssertCanDelegate,
+  forkPrepareDelegation,
+} from "../fork/delegationAgents/delegationHooks.ts";
 
 // Return recoverable handles before common MCP client timeouts expire.
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
@@ -1367,6 +1375,8 @@ const make = Effect.gen(function* () {
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
+  // fork: agent definitions
+  const forkAgents = yield* ForkDelegationAgents;
 
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -2898,6 +2908,8 @@ const make = Effect.gen(function* () {
             constraints: [...constraints],
           };
         }),
+        // fork: agent definitions
+        ...forkAgentsCapability(yield* forkAgents.list.pipe(Effect.orElseSucceed(() => []))),
         features: {
           appOwnedSubagents: true,
           asyncPolling: true,
@@ -2918,6 +2930,12 @@ const make = Effect.gen(function* () {
       if (input.target !== undefined && environmentId !== undefined) {
         yield* requireCapability(callerScope);
         const scope = yield* requireThreadScope(callerScope, "delegate_task");
+        // fork: enforce no-delegation on remote delegations too
+        yield* forkAssertCanDelegate({
+          agents: forkAgents,
+          callerThreadId: scope.thread.threadId,
+          failure,
+        });
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
           ...input,
@@ -2958,9 +2976,18 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      // fork: agent definitions set defaults, check limits, and tag the child
+      const forkAgent = yield* forkPrepareDelegation({
+        agents: forkAgents,
+        input,
+        callerThreadId: scope.thread.threadId,
+        providers,
+        instanceId: scope.thread.providerInstanceId,
+        failure,
+      });
       const target = yield* resolveTargetRechecking({
         parent,
-        target: input.target,
+        target: forkAgent.target,
         providers,
         cwd: yield* parentWorkspaceCwd(parent),
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
@@ -3009,6 +3036,13 @@ const make = Effect.gen(function* () {
       // prepares, so a caller that goes away must not stop it in between.
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          // fork: record the child agent before its first turn can start
+          if (forkAgent.definition !== undefined) {
+            yield* forkAgents.record(
+              IdAllocator.derive.delegatedTaskThread({ commandId }),
+              forkAgent.definition.name,
+            );
+          }
           // ThreadManagementService.dispatch is the chokepoint for this command
           // type's own enablement check, using the same command id and its
           // receipt-replay exemption, so no separate assert runs here.
@@ -3941,4 +3975,6 @@ export const layer: Layer.Layer<
   | SecretRequests.SecretRequests
   | ServerSettings.ServerSettingsService
   | RemoteDelegation.RemoteDelegation
+  // fork: agent definitions
+  | ForkDelegationAgents
 > = Layer.effect(OrchestratorMcpService, make);

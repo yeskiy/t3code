@@ -43,6 +43,8 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
@@ -1806,6 +1808,8 @@ effectIt.effect("preserves a replacement committed before exhausted start settle
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          // fork: agent definitions
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
           Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),

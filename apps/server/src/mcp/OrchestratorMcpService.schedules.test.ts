@@ -21,6 +21,8 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as Mcp from "./OrchestratorMcpService.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 
 const dependencies = Layer.mergeAll(
   NodeCrypto.layer,
@@ -41,6 +43,8 @@ const dependencies = Layer.mergeAll(
   Layer.mock(Secrets.SecretRequests)({}),
   Layer.mock(RemoteDelegation.RemoteDelegation)({}),
   Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
+  // fork: agent definitions
+  forkDelegationAgentsLayerEmpty,
 );
 
 const client: McpInvocationScope = {

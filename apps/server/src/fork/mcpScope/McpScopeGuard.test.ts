@@ -38,6 +38,8 @@ import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ProviderAdapterRegistryV2 } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { ThreadIssueService } from "../../orchestration-v2/ThreadIssueService.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../delegationAgents/delegationHooks.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ThreadSearch } from "../../orchestration-v2/ThreadSearch.ts";
@@ -109,6 +111,8 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(ThreadSearch)({}),
   Layer.mock(VcsStatusBroadcaster)({}),
   Layer.mock(Workflows)({}),
+  // fork: agent definitions
+  forkDelegationAgentsLayerEmpty,
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const layerRegisteredTools = Layer.mergeAll(

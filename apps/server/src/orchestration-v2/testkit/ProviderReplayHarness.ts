@@ -59,6 +59,8 @@ import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../../fork/delegationAgents/delegationHooks.ts";
 import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
@@ -466,6 +468,8 @@ export function layerWithRegistry<Error>(
     Layer.provide(
       Layer.mergeAll(
         McpAppModelContext.layerEmpty,
+        // fork: agent definitions
+        forkDelegationAgentsLayerEmpty,
         PreviewAgentActivity.layer,
         layerCheckpointServiceProvided,
         layerEventSinkProvided,

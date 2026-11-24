@@ -70,6 +70,8 @@ import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 // fork: Move to background for one tool call.
 import * as ForkToolCallControl from "../fork/ForkToolCallControl.ts";
+// fork: agent definitions
+import * as ForkDelegationAgents from "../fork/delegationAgents/ForkDelegationAgents.ts";
 
 export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationEventStore.layer,
@@ -174,6 +176,8 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       McpAppModelContext.layer,
+      // fork: agent definitions
+      ForkDelegationAgents.layer,
       PreviewAgentActivity.layer,
       layerCheckpointServiceProvided,
       layerEventSink,
@@ -436,6 +440,8 @@ export const layer = Layer.mergeAll(
   ForkToolCallControl.layer.pipe(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerProviderSessionManagerProvided)),
   ),
+  // fork: agent definitions shared by RunExecutionService and OrchestratorMcpService
+  ForkDelegationAgents.layer,
 );
 
 export const layerProduction = Layer.mergeAll(

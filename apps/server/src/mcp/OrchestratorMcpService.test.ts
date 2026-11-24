@@ -37,8 +37,10 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
@@ -79,12 +81,18 @@ import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { resolveRuntimeMode } from "./delegatedTaskModes.ts";
 import type { ProjectionRecordFilter } from "../orchestration-v2/ProjectionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+// fork: agent definitions
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ForkDelegationAgents from "../fork/delegationAgents/ForkDelegationAgents.ts";
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 
 const decodeTarget = Schema.decodeUnknownEffect(OrchestratorMcpTarget);
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  // fork: agent definitions
+  Layer.provide(forkDelegationAgentsLayerEmpty),
 );
 
 describe("OrchestratorMcpService", () => {
@@ -2715,6 +2723,223 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  // fork: agent definitions
+  it.effect(
+    "lists agents, records role-matched child agents, and blocks no-delegation children",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-mcp-agents-" });
+        const agentsDir = path.join(tempDir, "agents");
+        const storePath = path.join(tempDir, "fork", "delegation-agents.json");
+        yield* fs.makeDirectory(agentsDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(agentsDir, "researcher.md"),
+          `---
+name: researcher
+description: Read-only research.
+roles: [research, review]
+limits: [read-only, no-delegation]
+defaults:
+  claudeAgent: { model: claude-opus-5-5, effort: medium }
+---
+
+You are a read-only research agent.
+`,
+        );
+        const forkAgents = yield* ForkDelegationAgents.make({
+          agentsDir,
+          storePath,
+          skillRoots: [],
+        });
+        const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+        const claudeProvider: ServerProvider = {
+          ...providerSnapshot({
+            instanceId: claudeInstanceId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          }),
+          models: [
+            {
+              slug: "claude-opus-5-5",
+              name: "Claude Opus 5.5",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "effort",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [
+                      { id: "low", label: "Low" },
+                      { id: "medium", label: "Medium" },
+                      { id: "high", label: "High" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        };
+        const recordedCommand = yield* Ref.make<{
+          readonly commandId?: CommandId;
+          readonly modelSelection?: unknown;
+        }>({});
+        const parentScope: McpInvocationScope = {
+          ...scope,
+          thread: {
+            ...scope.thread!,
+            providerInstanceId: claudeInstanceId,
+          },
+        };
+        const parentWithClaude = (subagents: ReadonlyArray<unknown>) =>
+          ({
+            ...parentProjection(subagents),
+            thread: {
+              ...parentProjection(subagents).thread,
+              modelSelection: { instanceId: claudeInstanceId, model: "claude-opus-5-5" },
+            },
+            runs: [
+              {
+                ...parentProjection(subagents).runs[0],
+                providerInstanceId: claudeInstanceId,
+              },
+            ],
+          }) as unknown as OrchestrationV2ThreadProjection;
+        const derivedChildId = yield* Ref.make<ThreadId | undefined>(undefined);
+        const layerService = OrchestratorMcpService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+              Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+              Layer.succeed(ForkDelegationAgents.ForkDelegationAgents, forkAgents),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                hasReceipt: () => Effect.succeed(false),
+                getThreadRecords: (threadId) =>
+                  Effect.gen(function* () {
+                    const currentChild = yield* Ref.get(derivedChildId);
+                    if (threadId === parentThreadId) {
+                      return parentWithClaude(
+                        currentChild === undefined
+                          ? []
+                          : [
+                              {
+                                id: taskId,
+                                threadId: parentThreadId,
+                                origin: "app_owned",
+                                childThreadId: currentChild,
+                                providerInstanceId: claudeInstanceId,
+                                model: "claude-opus-5-5",
+                                status: "running",
+                                result: null,
+                              },
+                            ],
+                      );
+                    }
+                    return {
+                      ...childProjection,
+                      ...parentWithClaude([]),
+                      thread: {
+                        ...childProjection.thread,
+                        ...parentWithClaude([]).thread,
+                        id: threadId,
+                      },
+                    } as unknown as OrchestrationV2ThreadProjection;
+                  }),
+                dispatch: (command) =>
+                  Effect.gen(function* () {
+                    const cmd = command as {
+                      readonly commandId: CommandId;
+                      readonly modelSelection: unknown;
+                    };
+                    const nextChild = IdAllocator.derive.delegatedTaskThread({
+                      commandId: cmd.commandId,
+                    });
+                    yield* Ref.set(recordedCommand, {
+                      commandId: cmd.commandId,
+                      modelSelection: cmd.modelSelection,
+                    });
+                    yield* Ref.set(derivedChildId, nextChild);
+                    return {
+                      sequence: 1,
+                      storedEvents: [
+                        {
+                          event: {
+                            type: "subagent.updated",
+                            payload: {
+                              id: taskId,
+                              threadId: parentThreadId,
+                              origin: "app_owned",
+                              childThreadId: nextChild,
+                              providerInstanceId: claudeInstanceId,
+                              model: "claude-opus-5-5",
+                              status: "running",
+                              result: null,
+                            },
+                          },
+                        },
+                      ],
+                    } as never;
+                  }),
+              }),
+              ServerSettings.layerTest(),
+              providerRegistryLayer([claudeProvider]),
+              adapterRegistryLayer([claudeInstanceId]),
+              Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+              Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+            ),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const capabilities = yield* service.capabilities(parentScope);
+          assert.deepEqual(capabilities.agents, [
+            {
+              name: "researcher",
+              description: "Read-only research.",
+              roles: ["research", "review"],
+              limits: ["read-only", "no-delegation"],
+            },
+          ]);
+
+          const delegated = yield* service.delegateTask(parentScope, {
+            task: "Inspect the codebase.",
+            role: "research",
+            mode: "async",
+            clientRequestId: "fork-agent-role-research",
+          });
+          const command = yield* Ref.get(recordedCommand);
+          assert.deepEqual(command.modelSelection, {
+            instanceId: claudeInstanceId,
+            model: "claude-opus-5-5",
+            options: [{ id: "effort", value: "medium" }],
+          });
+          assert.isNotNull(delegated.childThreadId);
+          const storedAgent = yield* forkAgents.forThread(delegated.childThreadId!);
+          assert.equal(storedAgent?.name, "researcher");
+          assert.deepEqual(storedAgent?.limits, ["read-only", "no-delegation"]);
+
+          const childScope: McpInvocationScope = {
+            ...parentScope,
+            thread: {
+              ...parentScope.thread!,
+              threadId: delegated.childThreadId!,
+            },
+          };
+          const failure = yield* Effect.flip(
+            service.delegateTask(childScope, { task: "Try to delegate again." }),
+          );
+          assert.equal(failure.code, "invalid_request");
+          assert.include(failure.message, "This agent cannot delegate.");
+        }).pipe(Effect.provide(layerService));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects delegation to a provider without a registered adapter", () =>
     Effect.gen(function* () {
       const forkOnlyInstanceId = ProviderInstanceId.make("forkOnly");
@@ -3154,6 +3379,8 @@ describe("OrchestratorMcpService provider resolution", () => {
             }),
           ),
           Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          // fork: agent definitions
+          Layer.provide(forkDelegationAgentsLayerEmpty),
         );
 
         yield* Effect.gen(function* () {
@@ -3962,6 +4189,8 @@ describe("OrchestratorMcpService provider resolution", () => {
             resolveCommit: () => Effect.succeed({ commitSha: "abc123" }),
           }),
         ),
+        // fork: agent definitions
+        Layer.provide(forkDelegationAgentsLayerEmpty),
         Layer.provide(
           Layer.mergeAll(
             NodeServices.layer,
@@ -4239,6 +4468,8 @@ describe("OrchestratorMcpService provider resolution", () => {
       OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(git)),
+        // fork: agent definitions
+        Layer.provide(forkDelegationAgentsLayerEmpty),
         Layer.provide(
           Layer.mergeAll(
             NodeServices.layer,

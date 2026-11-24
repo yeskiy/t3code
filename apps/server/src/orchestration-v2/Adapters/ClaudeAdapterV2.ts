@@ -254,6 +254,8 @@ import {
   type ForkClaudeLaunchResolver,
 } from "../../fork/instanceLaunch/ForkClaudeLaunch.ts";
 import { forkOrchestrationInstructions } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
+// fork: agent definitions
+import { forkClaudeAgentParts } from "../../fork/delegationAgents/delegationHooks.ts";
 import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
@@ -13792,8 +13794,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 path,
               }),
               resolveToolSearchOverride(turnInput.runtimePolicy.cwd, launchArgSettings),
-              adapterOptions.forkClaudeLaunch?.resolve({ cwd: turnInput.runtimePolicy.cwd }) ??
-                Effect.undefined,
+              adapterOptions.forkClaudeLaunch?.resolve({
+                cwd: turnInput.runtimePolicy.cwd,
+                // fork: agent definitions
+                ...(turnInput.forkAgent === undefined
+                  ? {}
+                  : { agent: forkClaudeAgentParts(turnInput.forkAgent) }),
+              }) ?? Effect.undefined,
             ],
             { concurrency: "unbounded" },
           );

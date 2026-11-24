@@ -1418,6 +1418,123 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
     ),
   );
 
+  // fork: agent definitions
+  it.effect("passes forkAgent parts through forkClaudeLaunch into Claude query options", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-claude-fork-agent-",
+      });
+      const openedOptions = yield* Ref.make<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined>(
+        undefined,
+      );
+      const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+        instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_CLAUDE_SETTINGS,
+        environment: {},
+        attachmentsDir,
+        fileSystem,
+        path: yield* Path.Path,
+        random: yield* SecureRandom.SecureRandom,
+        idAllocator,
+        forkClaudeLaunch: {
+          resolve: ({ agent }) =>
+            Effect.succeed({
+              ...(agent === undefined
+                ? {}
+                : {
+                    appendText: agent.appendText,
+                    disallowedTools: [...agent.disallowedTools],
+                  }),
+              nativeAgentOff: false,
+            }),
+        },
+        queryRunner: {
+          allocateSessionId: Effect.succeed("native-thread-claude-fork-agent"),
+          open: (input) =>
+            Effect.gen(function* () {
+              yield* Ref.set(openedOptions, input.options);
+              return {
+                messages: Stream.never,
+                offer: () => Effect.void,
+                setModel: () => Effect.void,
+                applyFlagSettings: () => Effect.void,
+                setPermissionMode: () => Effect.void,
+                renameSession: () => Effect.void,
+                backgroundTasks: () => Effect.succeed(false),
+                mcpServerStatus: Effect.succeed([]),
+                readMcpResource: () => Effect.die("unexpected MCP resource read"),
+                callMcpTool: () => Effect.die("unexpected MCP tool call"),
+                mcpAuthenticate: () => Effect.die("unexpected MCP sign-in"),
+                mcpSubmitOAuthCallbackUrl: () => Effect.die("unexpected MCP sign-in"),
+                reconnectMcpServer: () => Effect.die("unexpected MCP reconnect"),
+                listPermissionRules: Effect.die("unexpected permission rules read"),
+                stopTask: () => Effect.void,
+                interrupt: Effect.void,
+                close: Effect.void,
+              } satisfies ClaudeAdapterV2.ClaudeAgentSdkQuerySession;
+            }),
+          forkSession: () => Effect.die("unused"),
+          subagentLaunchToolUseId: () => Effect.succeed(null),
+          subagentModel: () => Effect.succeed(null),
+          assertComplete: Effect.void,
+        },
+      });
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+      });
+      const threadId = ThreadId.make("thread-claude-fork-agent");
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-claude-fork-agent"),
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      const now = yield* DateTime.now;
+      yield* runtime.startTurn({
+        ...makeClaudeTestTurnInput({
+          threadId,
+          providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-fork-agent"),
+          text: "Inspect.",
+          attachments: [],
+          runtimePolicy,
+        }),
+        forkAgent: {
+          name: "researcher",
+          limits: ["read-only", "no-delegation"],
+          instructions: "## T3 agent: researcher\n\nInspect only.",
+        },
+      });
+      const options = yield* Ref.get(openedOptions);
+      assert.deepEqual(options?.disallowedTools, ["Write", "Edit", "NotebookEdit", "Agent"]);
+      assert.include(
+        typeof options?.systemPrompt === "object" && "append" in options.systemPrompt
+          ? (options.systemPrompt.append ?? "")
+          : "",
+        "## T3 agent: researcher\n\nInspect only.",
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect("keeps an MCP approval prompt on a code point boundary", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1881,7 +1998,7 @@ describe("ClaudeAdapterV2 provider installation gate", () => {
                 stopTask: () => Effect.void,
                 interrupt: Effect.void,
                 close: Effect.void,
-              } satisfies ClaudeAdapterV2.ClaudeAgentSdkQuerySession;
+              };
             }),
           forkSession: () => Effect.die("unused"),
           subagentLaunchToolUseId: () => Effect.succeed(null),

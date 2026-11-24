@@ -59,6 +59,10 @@ import * as ProviderCommitBatch from "./ProviderCommitBatch.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
+// fork: agent definitions
+import { ForkAgentError } from "../fork/delegationAgents/agentFile.ts";
+import { ForkDelegationAgents } from "../fork/delegationAgents/ForkDelegationAgents.ts";
+import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
@@ -91,6 +95,7 @@ const layerRunExecutionTest = RunExecutionService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       McpAppModelContext.layerEmpty,
+      forkDelegationAgentsLayerEmpty,
       PreviewAgentActivity.layer,
       Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
       layerTurnItemPositionsTest,
@@ -974,6 +979,7 @@ it.effect("passes the thread's MCP app context to the provider under a safe key"
         Layer.provide(
           Layer.mergeAll(
             PreviewAgentActivity.layer,
+            forkDelegationAgentsLayerEmpty,
             Layer.mock(McpAppModelContext.McpAppModelContext)({
               forThread: () =>
                 Effect.succeed([
@@ -1003,6 +1009,113 @@ it.effect("passes the thread's MCP app context to the provider under a safe key"
   ),
 );
 
+// fork: agent definitions
+it.effect("passes forkAgent onto turnInput and skips broken definitions", () =>
+  Effect.gen(function* () {
+    const expectedAgent = {
+      name: "researcher",
+      limits: ["read-only", "no-delegation"] as const,
+      instructions: "## T3 agent: researcher\n\nInspect only.",
+    };
+    const runWithAgents = (
+      forThread: ForkDelegationAgents["Service"]["forThread"],
+      suffix: string,
+    ) =>
+      Effect.gen(function* () {
+        const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+        const started = yield* Deferred.make<ProviderAdapter.ProviderAdapterV2TurnInput>();
+        const threadId = ThreadId.make(`thread:run-execution-fork-agent-${suffix}`);
+        const providerInstanceId = ProviderInstanceId.make("codex");
+        const attemptId = RunAttemptId.make(`attempt:run-execution-fork-agent-${suffix}`);
+        const session = {
+          events: Stream.never,
+          startTurn: (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+            Deferred.succeed(started, input),
+        } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+
+        yield* runExecution.startRootRun({
+          commandId: CommandId.make(`command:run-execution-fork-agent-${suffix}`),
+          appThread: rootAppThread(threadId),
+          providerSessionId: ProviderSessionId.make(`session:run-execution-fork-agent-${suffix}`),
+          session,
+          run: {
+            id: RunId.make(`run:run-execution-fork-agent-${suffix}`),
+            threadId,
+            ordinal: 1,
+            providerInstanceId,
+          } as OrchestrationV2Run,
+          rootNode: {
+            id: NodeId.make(`node:run-execution-fork-agent-${suffix}`),
+          } as OrchestrationV2ExecutionNode,
+          checkpointScope: {
+            id: CheckpointScopeId.make(`checkpoint-scope:run-execution-fork-agent-${suffix}`),
+          } as OrchestrationV2CheckpointScope,
+          providerThread: {
+            id: ProviderThreadId.make(`provider-thread:run-execution-fork-agent-${suffix}`),
+            driver,
+          } as OrchestrationV2ProviderThread,
+          attempt: { id: attemptId, providerTurnId: null } as OrchestrationV2RunAttempt,
+          attemptId,
+          providerTurnOrdinal: 1,
+          message: {
+            messageId: MessageId.make(`message:run-execution-fork-agent-${suffix}`),
+            text: "Inspect.",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd: process.cwd(),
+          },
+        });
+        return yield* Deferred.await(started);
+      }).pipe(
+        Effect.provide(
+          RunExecutionService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                McpAppModelContext.layerEmpty,
+                PreviewAgentActivity.layer,
+                Layer.succeed(
+                  ForkDelegationAgents,
+                  ForkDelegationAgents.of({
+                    list: Effect.succeed([]),
+                    resolveForTask: () => Effect.undefined,
+                    record: () => Effect.void,
+                    forThread,
+                  }),
+                ),
+                Layer.mock(CheckpointService.CheckpointServiceV2)({
+                  captureBaseline: () => Effect.void,
+                }),
+                layerTurnItemPositionsTest,
+                mockEventSink({}),
+                IdAllocator.layer,
+                ThreadCommandExecutor.layer,
+                Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
+                  ingestNormalized: () => Effect.succeed([]),
+                }),
+                ServerSettings.layerTest(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+    const loaded = yield* runWithAgents(() => Effect.succeed(expectedAgent), "loaded");
+    assert.deepEqual(loaded.forkAgent, expectedAgent);
+
+    const broken = yield* runWithAgents(
+      () => Effect.fail(new ForkAgentError({ detail: "Agent researcher is no longer defined." })),
+      "broken",
+    );
+    assert.isUndefined(broken.forkAgent);
+  }),
+);
+
 it.effect("fails the run when its ownership check cannot be read before calling the provider", () =>
   Effect.gen(function* () {
     const guardCalls = yield* Ref.make(0);
@@ -1016,6 +1129,7 @@ it.effect("fails the run when its ownership check cannot be read before calling 
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
           layerTurnItemPositionsTest,
@@ -1219,6 +1333,7 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({
             captureBaseline: () =>
@@ -1331,6 +1446,7 @@ it.effect("prompts the provider only after a forked baseline capture finishes", 
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({
             captureBaseline: () =>
@@ -1432,6 +1548,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
         Layer.provide(
           Layer.mergeAll(
             McpAppModelContext.layerEmpty,
+            forkDelegationAgentsLayerEmpty,
             PreviewAgentActivity.layer,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
               captureBaseline: () =>
@@ -1617,6 +1734,7 @@ it.effect("ingests new member threads of an owned child after the root turn term
               ]),
           }),
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
           layerTurnItemPositionsTest,
@@ -1878,6 +1996,7 @@ it.effect("ends a nested native subagent and its thread when the root run is int
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
           layerTurnItemPositionsTest,
@@ -2521,6 +2640,7 @@ it.effect(
         Layer.provide(
           Layer.mergeAll(
             McpAppModelContext.layerEmpty,
+            forkDelegationAgentsLayerEmpty,
             PreviewAgentActivity.layer,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
               captureBaseline: () => Effect.void,
@@ -2681,6 +2801,7 @@ it.effect(
         Layer.provide(
           Layer.mergeAll(
             McpAppModelContext.layerEmpty,
+            forkDelegationAgentsLayerEmpty,
             PreviewAgentActivity.layer,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
               captureBaseline: () => Effect.void,
@@ -3118,6 +3239,7 @@ it.effect("settles native subagents when a workspace handoff completes the root 
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({
             captureBaseline: () => Effect.void,
@@ -4348,6 +4470,7 @@ function captureRootRunTermination(input: {
     const layerTest = RunExecutionService.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          forkDelegationAgentsLayerEmpty,
           Layer.mock(McpAppModelContext.McpAppModelContext)({
             forThread: () => input.appContext ?? Effect.succeed([]),
           }),
@@ -4928,6 +5051,7 @@ function runBackgroundItemScenario(
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
+          forkDelegationAgentsLayerEmpty,
           Layer.succeed(PreviewAgentActivity.PreviewAgentActivity, previewActivity),
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
           layerTurnItemPositionsTest,
