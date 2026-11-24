@@ -84,7 +84,9 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   .annotate(Tool.Title, "Get orchestration capabilities")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  // fork: Claude Code defers MCP tools behind ToolSearch. Load this tool at start.
+  .annotate(Tool.Meta, { "anthropic/alwaysLoad": true });
 
 const DelegateTaskTool = Tool.make("delegate_task", {
   description:
@@ -98,6 +100,8 @@ const DelegateTaskTool = Tool.make("delegate_task", {
   .annotate(Tool.Title, "Delegate a child task")
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true)
+  // fork: Claude Code defers MCP tools behind ToolSearch. Load this tool at start.
+  .annotate(Tool.Meta, { "anthropic/alwaysLoad": true })
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const TaskStatusTool = Tool.make("task_status", {
@@ -113,6 +117,8 @@ const TaskStatusTool = Tool.make("task_status", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
+  // fork: Claude Code defers MCP tools behind ToolSearch. Load this tool at start.
+  .annotate(Tool.Meta, { "anthropic/alwaysLoad": true })
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const TaskCancelTool = Tool.make("task_cancel", {
@@ -126,6 +132,8 @@ const TaskCancelTool = Tool.make("task_cancel", {
 })
   .annotate(Tool.Title, "Cancel delegated task")
   .annotate(Tool.Destructive, true)
+  // fork: Claude Code defers MCP tools behind ToolSearch. Load this tool at start.
+  .annotate(Tool.Meta, { "anthropic/alwaysLoad": true })
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const WorkflowStopTool = Tool.make("t3_workflow_stop", {
