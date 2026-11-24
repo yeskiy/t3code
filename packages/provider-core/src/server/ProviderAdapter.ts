@@ -202,6 +202,8 @@ export const ProviderAdapterV2Event = Schema.Union([
     failure: Schema.Null,
     reason: Schema.optional(Schema.String),
     threadDisposition: Schema.Literals(["reusable", "broken"]),
+    // fork: turn-scoped Stop keeps provider background work running past this terminal.
+    backgroundWorkContinues: Schema.optional(Schema.Boolean),
     retainedRuntimeRequestIds: Schema.optional(Schema.Array(RuntimeRequestId)),
   }),
   Schema.Struct({
@@ -611,6 +613,8 @@ export interface ProviderAdapterV2InterruptInput {
   readonly providerThread: OrchestrationV2ProviderThread;
   readonly providerTurnId: ProviderTurnId;
   readonly requestRuntimeRestart?: boolean;
+  // fork: turn-scoped Stop ends only the turn and keeps background work alive.
+  readonly keepBackgroundWork?: boolean;
 }
 
 export interface ProviderAdapterV2RuntimeRequestResponseInput {

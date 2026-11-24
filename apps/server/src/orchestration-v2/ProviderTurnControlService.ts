@@ -62,6 +62,7 @@ export interface ProviderTurnControlServiceV2Shape {
     readonly providerSessionId: ProviderSessionId;
     readonly providerThreadId: ProviderThreadId;
     readonly providerTurnId: ProviderTurnId;
+    readonly scope?: "turn"; // fork: turn-scoped Stop
   }) => Effect.Effect<
     void | ProviderAdapter.ProviderAdapterV2SubagentOutcome,
     ProviderTurnControlError
@@ -277,7 +278,8 @@ export const layer: Layer.Layer<
       }),
       interrupt: Effect.fn("ProviderTurnControlService.interrupt")(
         function* (input) {
-          const loaded = yield* load({ ...input, operation: "interrupt" });
+          const { scope, ...target } = input; // fork: turn-scoped Stop
+          const loaded = yield* load({ ...target, operation: "interrupt" });
           const session = Option.isSome(loaded.session)
             ? loaded.session
             : yield* sessions.get(input.providerSessionId);
@@ -309,12 +311,19 @@ export const layer: Layer.Layer<
                 : { requestedAt: input.subagent.requestedAt }),
             });
           }
+          // fork: turn-scoped Stop keeps background work when the provider supports it.
+          const keepBackgroundWork =
+            scope === "turn" &&
+            session.value.providerSession.capabilities.turns.interruptKeepsBackgroundWork === true;
+          if (keepBackgroundWork && loaded.providerTurn.status !== "running") return;
           // Settled turns still reach adapters, which alone know whether background work remains.
           yield* session.value
             .interruptTurn({
               providerThread: loaded.providerThread,
               providerTurnId: loaded.providerTurn.id,
-              requestRuntimeRestart: true,
+              ...(keepBackgroundWork
+                ? { keepBackgroundWork: true }
+                : { requestRuntimeRestart: true }),
             })
             .pipe(
               Effect.catchTags({

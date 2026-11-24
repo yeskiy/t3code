@@ -899,4 +899,60 @@ describe("V2 environment commands", () => {
       ]);
     }).pipe(Effect.provide(layerTestRandom)),
   );
+
+  // fork: turn-scoped Stop forwards scope on both thread.stop and run.interrupt.
+  it.effect("forwards turn scope on thread.stop when advertised", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({
+        commands,
+        projects: [],
+        advertiseThreadStop: true,
+      });
+
+      yield* interruptThreadTurn({
+        commandId: CommandId.make("turn-scoped-thread-stop"),
+        threadId: v2ThreadId,
+        scope: "turn",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(commands).toEqual([
+        {
+          type: "thread.stop",
+          commandId: "turn-scoped-thread-stop",
+          threadId: v2ThreadId,
+          scope: "turn",
+        },
+      ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
+
+  it.effect("forwards turn scope on run.interrupt when targeting a run", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const runId = RunId.make("run-turn-scoped-stop");
+      const supervisor = yield* makeSupervisor({
+        commands,
+        projects: [],
+      });
+
+      yield* interruptThreadTurn({
+        commandId: CommandId.make("turn-scoped-run-interrupt"),
+        threadId: v2ThreadId,
+        runId,
+        scope: "turn",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(commands).toEqual([
+        {
+          type: "run.interrupt",
+          commandId: "turn-scoped-run-interrupt",
+          threadId: v2ThreadId,
+          runId,
+          holdQueue: true,
+          scope: "turn",
+        },
+      ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
 });

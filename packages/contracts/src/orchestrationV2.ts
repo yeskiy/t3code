@@ -313,6 +313,8 @@ export const OrchestrationV2TurnCapabilities = Schema.Struct({
   supportsSteeringByInterruptRestart: Schema.Boolean,
   supportsQueuedMessages: Schema.Boolean,
   terminalStatusQuality: Schema.Literals(["strong", "weak", "none"]),
+  // fork: turn-scoped Stop can leave background work running.
+  interruptKeepsBackgroundWork: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2TurnCapabilities = typeof OrchestrationV2TurnCapabilities.Type;
 
@@ -3236,6 +3238,8 @@ export const OrchestrationV2Command = Schema.Union([
      * do under their caller's dispatch limit. Otherwise Stop also stops every task under the thread.
      */
     stopDelegatedTasks: Schema.optional(Schema.Boolean),
+    // fork: turn-scoped Stop ends only a running turn and keeps background work alive.
+    scope: Schema.optional(Schema.Literals(["turn", "all"])),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.create"),
@@ -3614,6 +3618,8 @@ export const OrchestrationV2Command = Schema.Union([
     runId: RunId,
     reason: Schema.optional(Schema.String),
     holdQueue: Schema.optional(Schema.Boolean),
+    // fork: turn-scoped Stop ends only a running turn and keeps background work alive.
+    scope: Schema.optional(Schema.Literals(["turn", "all"])),
   }),
   Schema.Struct({
     type: Schema.Literal("queued-message.promote-to-steer"),
@@ -3941,6 +3947,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
         }),
       }),
     ),
+    // fork: turn-scoped Stop keeps delegated tasks and live provider background work.
+    scope: Schema.optional(Schema.Literal("turn")),
   }),
   /**
    * Internal so no client can mark a request saved without the value being

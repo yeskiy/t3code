@@ -42,6 +42,7 @@ import * as Stream from "effect/Stream";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
+import * as ForkStopScope from "../fork/ForkStopScope.ts"; // fork: turn-scoped Stop
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -719,6 +720,8 @@ export const layer: Layer.Layer<
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+    // fork: interrupted runs still ingesting kept work deliver their own items without inheritance.
+    const runsIngestingKeptWork = yield* Ref.make<ReadonlySet<OrchestrationV2Run["id"]>>(new Set());
 
     const writeFinalRunEvents = Effect.fn("RunExecutionService.writeFinalRunEvents")(
       function* (input: {
@@ -809,6 +812,7 @@ export const layer: Layer.Layer<
         const cascadedSubagentEvents =
           isRunOwnedSubagentTerminalStatus(subagentTerminal.status) &&
           !childTurnsContinue(subagentTerminal) &&
+          !ForkStopScope.terminalKeepsBackgroundWork(subagentTerminal) && // fork: turn-scoped Stop
           hasOpenSubagentProjection
             ? yield* cascadeTerminalizeRunOwnedSubagents({
                 run: input.run,
@@ -1213,6 +1217,12 @@ export const layer: Layer.Layer<
         const inheritedBackgroundTurnItems = yield* (
           input.loadInheritedBackgroundTurnItems?.() ?? Effect.succeed([])
         ).pipe(
+          // fork: skip items whose interrupted run is still ingesting kept background work.
+          Effect.flatMap((items) =>
+            Ref.get(runsIngestingKeptWork).pipe(
+              Effect.map((ingesting) => items.filter((item) => !ingesting.has(item.runId))),
+            ),
+          ),
           Effect.onError(() => eventSubscription.close),
           Effect.mapError(
             (cause) =>
@@ -1321,7 +1331,11 @@ export const layer: Layer.Layer<
           if (!handedOff || !(yield* writeTerminal({ ...terminal, status: "completed" }))) {
             yield* writeTerminal(terminal);
           }
-          if (isRunOwnedSubagentTerminalStatus(terminal.status) && !childTurnsContinue(terminal)) {
+          if (
+            isRunOwnedSubagentTerminalStatus(terminal.status) &&
+            !childTurnsContinue(terminal) &&
+            !ForkStopScope.terminalKeepsBackgroundWork(terminal) // fork: turn-scoped Stop
+          ) {
             yield* Ref.set(openRunOwnedSubagents, emptyOpenRunOwnedSubagentProjection());
             idleFlushClosed = true;
           }
@@ -1602,7 +1616,8 @@ export const layer: Layer.Layer<
           if (
             terminal !== null &&
             terminal.status !== "completed" &&
-            !childTurnsContinue(terminal)
+            !childTurnsContinue(terminal) &&
+            !ForkStopScope.terminalKeepsBackgroundWork(terminal) // fork: turn-scoped Stop
           ) {
             return true;
           }
@@ -1639,7 +1654,8 @@ export const layer: Layer.Layer<
           if (
             terminal !== null &&
             terminal.status !== "completed" &&
-            !childTurnsContinue(terminal)
+            !childTurnsContinue(terminal) &&
+            !ForkStopScope.terminalKeepsBackgroundWork(terminal) // fork: turn-scoped Stop
           ) {
             // A failed turn can leave background work running in a live provider process.
             return (
@@ -1962,6 +1978,12 @@ export const layer: Layer.Layer<
           if (event.type === "turn.terminal") {
             yield* Ref.set(terminalEvent, event);
             yield* Ref.set(rootTerminalSeen, true);
+            // fork: track interrupted runs that keep ingesting background work.
+            if (ForkStopScope.terminalKeepsBackgroundWork(event)) {
+              yield* Ref.update(runsIngestingKeptWork, (current) =>
+                new Set(current).add(input.run.id),
+              );
+            }
             yield* finalizeRootRun(event);
           }
           if (event.type === "background_work.updated") {
@@ -2194,6 +2216,15 @@ export const layer: Layer.Layer<
             ),
             Effect.ensuring(endPreviewActivity),
             Effect.ensuring(eventSubscription.close),
+            // fork: clear kept-work tracking when this run's event stream closes.
+            Effect.ensuring(
+              Ref.update(runsIngestingKeptWork, (current) => {
+                if (!current.has(input.run.id)) return current;
+                const next = new Set(current);
+                next.delete(input.run.id);
+                return next;
+              }),
+            ),
             Effect.forkDetach,
           );
 
