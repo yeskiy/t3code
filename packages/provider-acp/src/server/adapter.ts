@@ -117,6 +117,7 @@ import {
   flattenSelectChoices,
 } from "./sessionConfig.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { handlePostSettleCommandHoldExpiry } from "./fork/postSettleWake.ts"; // fork: post-settle hold wake
 import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
@@ -690,6 +691,8 @@ export interface AcpAdapterV2Flavor {
   readonly postSettleCommandHold?: {
     readonly timeout: Duration.Input;
     readonly isCommand: (toolCall: AcpToolCallState) => boolean;
+    // fork: optional one-shot wake prompt on first hold expiry before finalizing later.
+    readonly wakePrompt?: (commands: ReadonlyArray<AcpToolCallState>) => string;
   };
   readonly isProviderWakeNotification?: (
     notification: EffectAcpSchema.SessionNotification,
@@ -1787,6 +1790,8 @@ interface ActiveAcpTurn {
   promptSequence: number;
   /** The turn already resent a prompt after a resumable outcome failure. */
   outcomeResumed: boolean;
+  // fork: prevents waking a turn more than once on post-settle command hold expiry.
+  postSettleHoldWoken: boolean;
   /** Clock millis just before `session/prompt` was handed to the runtime. */
   promptSentAt: number | null;
   /** Completed when an update after dispatch matches `cancelAfterPromptStarts.isStart`. */
@@ -9045,10 +9050,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const timeoutMillis = Duration.toMillis(hold.timeout);
             const isRunningCommand = (tool: AcpToolCallState) =>
               toolStatus(tool.status) === "running" && hold.isCommand(tool);
+            const promptSequence = context.promptSequence; // fork: stop stale hold loop on prompt-steer
             let quietSince = yield* Clock.currentTimeMillis;
             // Armed even without a command yet: a pending reply can still start one.
             yield* Effect.gen(function* () {
-              while (!context.finalized) {
+              while (
+                !context.finalized &&
+                !context.interrupted &&
+                context.promptSettled &&
+                context.promptSequence === promptSequence
+              ) {
                 quietSince = Math.max(quietSince, context.lastProgressAt);
                 const now = yield* Clock.currentTimeMillis;
                 const remaining = quietSince + timeoutMillis - now;
@@ -9056,12 +9067,49 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   yield* Effect.sleep(Duration.millis(remaining));
                   continue;
                 }
+                const runningCommands = [...context.tools.values()].filter(isRunningCommand);
                 if (
-                  context.tools.values().some(isRunningCommand) &&
+                  runningCommands.length > 0 &&
                   !hasDeferredBackgroundWork(context, isRunningCommand)
                 ) {
-                  yield* finalizeTurn(context, context.promptSettledStatus ?? "completed");
-                  return;
+                  // fork: wake once when configured, then finalize on a later expiry.
+                  const isHoldStillExpired = () =>
+                    !context.finalized &&
+                    !context.interrupted &&
+                    context.promptSettled &&
+                    context.promptSequence === promptSequence &&
+                    context.tools.values().some(isRunningCommand) &&
+                    !hasDeferredBackgroundWork(context, isRunningCommand);
+                  const outcome = yield* handlePostSettleCommandHoldExpiry({
+                    state: context,
+                    commands: runningCommands,
+                    wakePrompt: hold.wakePrompt,
+                    isStillEligible: isHoldStillExpired,
+                    canKeepWaiting: () =>
+                      !context.finalized &&
+                      !context.interrupted &&
+                      context.promptSettled &&
+                      context.promptSequence === promptSequence,
+                    sendWakePrompt: (text) =>
+                      steerWithPrompt(
+                        {
+                          threadId: context.input.threadId,
+                          runId: context.input.runId,
+                          providerThread: context.input.providerThread,
+                          providerTurnId: context.providerTurnId,
+                          message: { ...context.input.message, text, attachments: [] },
+                        },
+                        {
+                          claim: (turn) => {
+                            if (!isHoldStillExpired() || turn.postSettleHoldWoken) return false;
+                            turn.postSettleHoldWoken = true;
+                            return true;
+                          },
+                        },
+                      ),
+                    finalize: finalizeTurn(context, context.promptSettledStatus ?? "completed"),
+                  });
+                  if (outcome === "done") return;
                 }
                 // Something else still holds the turn; count silence again once it clears.
                 quietSince = now;
@@ -9874,6 +9922,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               foregroundIdle: yield* Deferred.make<void>(),
               promptSequence: 0,
               outcomeResumed: false,
+              postSettleHoldWoken: false, // fork: post-settle hold wake
               promptSentAt: null,
               promptStarted,
               promptUsage: undefined,
@@ -10106,6 +10155,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
 
         const steerWithPrompt = Effect.fn("AcpAdapterV2.steerWithPrompt")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2SteerInput,
+          steerOptions?: { readonly claim?: (context: ActiveAcpTurn) => boolean }, // fork: atomic wake guard
         ) {
           const isNativeSlashCommand = turnInput.message.text.trimStart().startsWith("/");
           const text = yield* providerMessageTextWithAttachmentPaths({
@@ -10141,7 +10191,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               const steered = yield* runRuntimeCallbackAtGeneration(
                 generation,
                 Effect.gen(function* () {
-                  if (context.finalized || context.interrupted) return false;
+                  if (
+                    context.finalized ||
+                    context.interrupted ||
+                    steerOptions?.claim?.(context) === false // fork: atomic wake guard
+                  ) {
+                    return false;
+                  }
                   const compactionMarker = (yield* Ref.get(compactionMarkers)).get(
                     context.nativeThreadId,
                   );

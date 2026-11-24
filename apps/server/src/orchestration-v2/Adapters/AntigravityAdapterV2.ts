@@ -51,6 +51,7 @@ import {
   normalizeAntigravityToolCall,
 } from "../../provider/acp/AntigravityProtocol.ts";
 import { isAntigravitySignInRequiredError } from "../../provider/antigravityAuthSupport.ts";
+import { buildAntigravityHoldWakePrompt } from "../../fork/ForkAntigravityHoldWake.ts"; // fork: post-settle hold wake
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
@@ -253,6 +254,8 @@ export function makeAntigravityAcpAdapterFlavor(
     postSettleCommandHold: {
       timeout: "30 minutes",
       isCommand: antigravityCommandOutlivesPrompt,
+      // fork: wake once on hold expiry so the agent writes a report before finalizing later.
+      wakePrompt: buildAntigravityHoldWakePrompt,
     },
     // session/cancel ends the agent's running commands, so only Stop sends it once the prompt
     // has ended. A message sent while a command runs leaves the command alone.
