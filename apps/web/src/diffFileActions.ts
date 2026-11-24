@@ -7,6 +7,7 @@ import {
 } from "@t3tools/shared/path";
 
 import { useRightPanelStore } from "./rightPanelStore";
+import { openForkFileOrFallback } from "./fork/externalOpen/forkExternalOpen"; // fork: external open
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 
 interface OpenDiffFilePrimaryActionInput {
@@ -111,7 +112,13 @@ export function openDiffFilePrimaryAction({
   if (!workspaceFilePath) return;
 
   if (threadRef) {
-    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath);
+    // fork: open diff files in OS default app when configured.
+    void openForkFileOrFallback({
+      environmentId: threadRef.environmentId,
+      path: workspaceFilePath,
+      cwd: activeCwd,
+      fallback: () => useRightPanelStore.getState().openFile(threadRef, workspaceFilePath),
+    });
     return;
   }
 

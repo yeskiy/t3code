@@ -6,6 +6,7 @@ import type { MessageResolver } from "~/i18n/messages";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
 import { useTheme } from "~/hooks/useTheme";
+import { openForkFileOrFallback } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
@@ -118,7 +119,13 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
     ),
     icon: <PierreEntryIcon pathValue={match.path} kind="file" theme={resolvedTheme} />,
     run: async () => {
-      useRightPanelStore.getState().openFile(target.threadRef, match.path);
+      // fork: open picked files in OS default app when configured.
+      await openForkFileOrFallback({
+        environmentId: target.environmentId,
+        path: match.path,
+        cwd: target.cwd,
+        fallback: () => useRightPanelStore.getState().openFile(target.threadRef, match.path),
+      });
     },
   }));
 

@@ -120,6 +120,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
+import { useForkOpenLinksIn } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -699,7 +700,8 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   const searchableSetting = useSearchableSetting();
   const gt = useGT();
   const m = useMessages();
-  const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
+  // fork: keep Browser settings in sync with the fork "Open links in" preference.
+  const [linkTarget, setForkLinkTarget] = useForkOpenLinksIn();
   const updateSettings = useUpdateScopedSettings();
 
   return (
@@ -713,7 +715,10 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
           <SettingResetButton
             ariaLabel={gt("Reset link target to default")}
-            onClick={() => updateSettings({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET })}
+            onClick={() => {
+              setForkLinkTarget(DEFAULT_BROWSER_LINK_TARGET);
+              updateSettings({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET });
+            }}
           />
         ) : null
       }
@@ -723,6 +728,7 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
           value={linkTarget}
           onValueChange={(value) => {
             if (value === "system" || value === "app") {
+              setForkLinkTarget(value);
               updateSettings({ browserLinkTarget: value });
             }
           }}

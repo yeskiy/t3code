@@ -1201,6 +1201,19 @@ export interface DesktopBridge {
   receiveProviderAuthCallback: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback: (authorizationUrl: string) => Promise<void>;
   startFileDrag: (input: { environmentId: EnvironmentId; path: string }) => Promise<boolean>;
+  // fork: open a load-checked local file in the OS default app via Electron shell.openPath
+  forkOpenPath?: (input: { environmentId: EnvironmentId; path: string }) => Promise<{
+    readonly ok: boolean;
+    readonly reason?:
+      | "unauthorized-sender"
+      | "not-host-environment"
+      | "invalid-path"
+      | "blocked-executable"
+      | "not-found"
+      | "open-failed"
+      | undefined;
+    readonly error?: string | undefined;
+  }>;
   openExternal: (url: string) => Promise<boolean>;
   /** Reads http(s) media in the main process, outside renderer CORS and CSP; null on network failure. */
   readMedia: (url: string) => Promise<DesktopMediaRead | null>;

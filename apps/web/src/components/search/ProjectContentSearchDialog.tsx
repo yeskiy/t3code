@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
 import { useRenderedAppearance, useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
+import { openForkFileOrFallback } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useProjectContentSearch } from "~/state/queries";
 import { readEnvironmentScope } from "~/state/session";
@@ -161,7 +162,14 @@ function OpenContentSearchDialog(props: {
       return;
     }
     props.onOpenChange(false);
-    useRightPanelStore.getState().openFile(target.threadRef, match.path, match.lineNumber);
+    // fork: open search result files in OS default app when configured.
+    void openForkFileOrFallback({
+      environmentId: target.environmentId,
+      path: match.path,
+      cwd: target.cwd,
+      fallback: () =>
+        useRightPanelStore.getState().openFile(target.threadRef, match.path, match.lineNumber),
+    });
   };
   const fileCount = new Set(matches.map((match) => match.path)).size;
   const showSearchStatus =

@@ -16,6 +16,11 @@ import {
 import { useAssetUrlRefresh, useAssetUrlState } from "../../assets/assetUrls";
 import type { MessageResolver } from "../../i18n/messages";
 import { cn } from "../../lib/utils";
+import {
+  openForkExternalBrowserUrl,
+  openForkFileOrFallback,
+  shouldForkInterceptInAppLink,
+} from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { useRightPanelStore } from "../../rightPanelStore";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
@@ -96,6 +101,7 @@ function expandableMarkdownImageProps(
   onImageExpand: ((preview: ExpandedImagePreview) => void) | undefined,
   alt: string,
   resolve: MessageResolver,
+  actionsSource?: MediaActionSource,
 ) {
   if (!onImageExpand) return {};
   const previewName = alt.trim();
@@ -104,7 +110,27 @@ function expandableMarkdownImageProps(
     event.preventDefault();
     event.stopPropagation();
     const item = markdownImageItems.get(event.currentTarget);
-    if (item) onImageExpand(markdownImageGallery(event.currentTarget, item));
+    const openLightbox = () => {
+      if (item) onImageExpand(markdownImageGallery(event.currentTarget, item));
+    };
+    // fork: open clicked local image files in default app, or web image URLs in system browser.
+    const ref = actionsSource?.reference;
+    if (ref?.kind === "file" && actionsSource?.asset) {
+      void openForkFileOrFallback({
+        environmentId: actionsSource.asset.environmentId,
+        path: ref.path,
+        altKey: event.altKey,
+        fallback: openLightbox,
+      });
+      return;
+    }
+    if (ref?.kind === "url" && !event.altKey && !shouldForkInterceptInAppLink()) {
+      void openForkExternalBrowserUrl(ref.url).then((opened) => {
+        if (!opened) openLightbox();
+      });
+      return;
+    }
+    openLightbox();
   };
   return {
     role: "button" as const,
@@ -238,7 +264,7 @@ export function ChatMarkdownImage(props: {
             props.onImageExpand && "cursor-zoom-in",
           )}
           style={props.style}
-          {...expandableMarkdownImageProps(props.onImageExpand, props.alt, m)}
+          {...expandableMarkdownImageProps(props.onImageExpand, props.alt, m, props.actionsSource)}
           {...imageEvents(src)}
         />
       </MediaActions>
@@ -379,9 +405,16 @@ export function assetMediaActionsSource(input: {
     ...(relativePath && (resource._tag === "media-file" || resource._tag === "workspace-file")
       ? {
           onOpenFile: () =>
-            useRightPanelStore
-              .getState()
-              .openFile({ environmentId, threadId: resource.threadId }, relativePath),
+            // fork: open media file in OS default app when configured.
+            void openForkFileOrFallback({
+              environmentId,
+              path: path ?? relativePath,
+              cwd: input.workspaceRoot,
+              fallback: () =>
+                useRightPanelStore
+                  .getState()
+                  .openFile({ environmentId, threadId: resource.threadId }, relativePath),
+            }),
         }
       : {}),
   };

@@ -25,6 +25,7 @@ import {
   useRightPanelStore,
 } from "../../rightPanelStore";
 import { requestWorkspaceContentFocus, requestWorkspaceFocus } from "../../lib/workspaceFocus";
+import { openForkFileOrFallback } from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { setActivePreviewTab } from "../../previewStateStore";
 import { isBrowserSettingsReadError } from "../../browser/openFileInPreview";
 import { addBrowserSurface } from "../preview/addBrowserSurface";
@@ -179,7 +180,13 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   const addDeviceSurfaceStable = useStableCallback(addDeviceSurface);
   const openFileSurface = (relativePath: string) => {
     if (!activeThreadRef || !activeProject) return;
-    useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
+    // fork: open clicked file tree and breadcrumb files in OS default app when configured.
+    void openForkFileOrFallback({
+      environmentId: activeThreadRef.environmentId,
+      path: relativePath,
+      cwd: gitCwd ?? activeProjectCwd ?? undefined,
+      fallback: () => useRightPanelStore.getState().openFile(activeThreadRef, relativePath),
+    });
   };
   const openFileSurfaceStable = useStableCallback(openFileSurface);
   const closePreviewPanel = () => {

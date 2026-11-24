@@ -4,7 +4,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 
-import { ensureClientSettingsHydrated, getClientSettings } from "~/hooks/useSettings";
+import { readForkOpenLinksIn } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { readEnvironmentScope } from "~/state/session";
 import { isPreviewAvailableFor } from "./previewRuntime";
 import { isWebUrl } from "./webUrl";
@@ -32,8 +32,8 @@ export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTar
 
 /** Before hydration, the default "system" would ignore a saved "app" link target. */
 export async function resolveBrowserLinkTargetPreference(): Promise<BrowserLinkTarget> {
-  await ensureClientSettingsHydrated();
-  return getClientSettings().browserLinkTarget;
+  // fork: read the fork "Open links in" preference (defaults to system browser).
+  return readForkOpenLinksIn();
 }
 
 export function canOpenLinksInApp(threadRef: ScopedThreadRef | null | undefined): boolean {

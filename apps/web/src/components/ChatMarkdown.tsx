@@ -210,6 +210,13 @@ import {
   isBrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+// fork: external open helpers for links and local files
+import { isMailtoUrl } from "../fork/externalOpen/externalOpen.logic";
+import {
+  openForkFileOrFallback,
+  shouldForkInterceptInAppLink,
+  useForkOpenLinksIn,
+} from "../fork/externalOpen/forkExternalOpen";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { IssueLinkPreview, IssueLinkPreviewFallback } from "./issue/IssueLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
@@ -622,7 +629,14 @@ function useChatMarkdownState({
         environmentId === null ? undefined : readPreparedConnection(environmentId)?.httpBaseUrl,
       createAssetUrl,
       onOpenFile: threadRef
-        ? (path) => useRightPanelStore.getState().openFile(threadRef, path)
+        ? (path) =>
+            // fork: open local media files in OS default app when configured.
+            void openForkFileOrFallback({
+              environmentId: threadRef.environmentId,
+              path,
+              cwd,
+              fallback: () => useRightPanelStore.getState().openFile(threadRef, path),
+            })
         : undefined,
     }).then(
       (preview) => {
@@ -738,7 +752,8 @@ function useChatMarkdownState({
   const openIssueLink = useOpenIssueLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
   // Subscribe so hydrated settings apply before the anchor synchronously decides whether to intercept _blank.
-  const linkTargetPreference = useClientSettings((settings) => settings.browserLinkTarget);
+  // fork: use fork "Open links in" preference (defaults to system browser).
+  const [linkTargetPreference] = useForkOpenLinksIn();
   const mathEnabled = useClientSettings((settings) => settings.mathRenderingEnabled);
   // Keyed by the file links found, not the text, so streamed text that adds none keeps the
   // renderer context, and every block reading it, unchanged.
@@ -993,6 +1008,18 @@ function useChatMarkdownState({
           markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
         }
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}
+        // fork: resolve host path and open local file in OS default app when configured.
+        onOpenExternalFile={(altKey, fallback) => {
+          void resolveHostPath().then(({ absolutePath }) =>
+            openForkFileOrFallback({
+              environmentId,
+              path: absolutePath,
+              cwd,
+              altKey,
+              fallback,
+            }),
+          );
+        }}
         onOpenMedia={
           threadRef && canPreviewMedia
             ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
@@ -1326,6 +1353,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
               return;
             }
             if (
+              // fork: only hijack web image/video links into the lightbox when "Open links in" is T3 browser.
+              shouldForkInterceptInAppLink() &&
               href &&
               faviconHost !== null &&
               mediaKindFromPath(href) !== null &&
@@ -1364,7 +1393,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
               }) !== "app"
             ) {
               // Open desktop Alt-clicks before Chromium downloads them so link routers can read the held key.
-              if (isElectron && event.altKey) {
+              // fork: also route mailto links through openExternal so the OS mail app launches cleanly.
+              if (isElectron && (event.altKey || isMailtoUrl(href))) {
                 event.preventDefault();
                 event.stopPropagation();
                 void readLocalApi()
@@ -1626,7 +1656,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
                   threadId: threadRef.threadId,
                   path: filePath,
                 },
-                onOpen: () => useRightPanelStore.getState().openFile(threadRef, filePath),
+                // fork: open audio file in OS default app when configured.
+                onOpen: () =>
+                  void openForkFileOrFallback({
+                    environmentId: threadRef.environmentId,
+                    path: filePath,
+                    cwd,
+                    fallback: () => useRightPanelStore.getState().openFile(threadRef, filePath),
+                  }),
               }
             : imageSource._tag === "Direct"
               ? { src: resolveProtocolRelativeMediaUrl(imageSource.uri) }

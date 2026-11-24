@@ -44,6 +44,8 @@ interface MarkdownFileLinkProps {
   threadRef?: ScopedThreadRef | undefined;
   onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
+  // fork: open local file in OS default app unless Alt is held or setting is T3 viewer.
+  onOpenExternalFile?: ((altKey: boolean, fallback: () => void) => void) | undefined;
   resolveDragPath: () => Promise<string>;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
   openInEditorMenuLabel: string;
@@ -70,6 +72,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   threadRef,
   onOpen,
   onOpenInPanel,
+  onOpenExternalFile, // fork: external open
   openInEditorMenuLabel,
   onOpenInBrowser,
   onOpenMedia,
@@ -351,11 +354,19 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                   handleOpenInEditor();
                   return;
                 }
-                if (useBrowserPrimaryAction) {
-                  handleOpenInBrowser();
+                // fork: open local file in OS default app when configured (Alt-click opens in T3 viewer).
+                const openInAppFallback = () => {
+                  if (useBrowserPrimaryAction) {
+                    handleOpenInBrowser();
+                    return;
+                  }
+                  handleOpenInFilePreview();
+                };
+                if (onOpenExternalFile) {
+                  onOpenExternalFile(event.altKey, openInAppFallback);
                   return;
                 }
-                handleOpenInFilePreview();
+                openInAppFallback();
               }}
               onContextMenu={handleContextMenu}
             >
@@ -425,6 +436,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.isAppBundle === next.isAppBundle &&
     previous.onOpen === next.onOpen &&
     previous.onOpenInPanel === next.onOpenInPanel &&
+    previous.onOpenExternalFile === next.onOpenExternalFile && // fork: external open
     previous.openInEditorMenuLabel === next.openInEditorMenuLabel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onOpenMedia === next.onOpenMedia &&
