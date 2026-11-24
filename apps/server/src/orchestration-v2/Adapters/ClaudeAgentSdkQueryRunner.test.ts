@@ -587,6 +587,65 @@ it.effect.each([
   }).pipe(Effect.provide(realQueryRunner)),
 );
 
+it.effect(
+  "sends spare_background_tasks on turn-scoped interrupt and falls back when request is absent",
+  () =>
+    Effect.gen(function* () {
+      const controlRequests: Array<unknown> = [];
+      const plainInterrupts = vi.fn(async () => undefined);
+      const fallbackInterrupts = vi.fn(async () => undefined);
+      let opens = 0;
+      const querySpy = vi.spyOn(ClaudeSdk, "query").mockImplementation(() => {
+        opens += 1;
+        if (opens === 1) {
+          return {
+            initializationResult: async () => ({}),
+            request: async (payload: unknown) => {
+              controlRequests.push(payload);
+              return { response: {} };
+            },
+            interrupt: plainInterrupts,
+            close: vi.fn(),
+          } as unknown as ClaudeSdk.Query;
+        }
+        return {
+          initializationResult: async () => ({}),
+          interrupt: fallbackInterrupts,
+          close: vi.fn(),
+        } as unknown as ClaudeSdk.Query;
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => querySpy.mockRestore()));
+      const runner = yield* ClaudeAgentSdkQueryRunner;
+      const openInput = {
+        threadId: ThreadId.make("thread-interrupt-spare"),
+        providerSessionId: ProviderSessionId.make("session-interrupt-spare"),
+        options: {
+          sessionId: FORK_SESSION_ID,
+          model: "claude-sonnet-4-6",
+          tools: [],
+          permissionMode: "default" as const,
+        },
+      } satisfies ClaudeAgentSdkQueryOpenInput;
+
+      const sessionWithRequest = yield* runner.open(openInput);
+      yield* Effect.addFinalizer(() => sessionWithRequest.close.pipe(Effect.orDie));
+      assert.isDefined(sessionWithRequest.interruptKeepingBackgroundWork);
+      yield* sessionWithRequest.interruptKeepingBackgroundWork!;
+      assert.deepEqual(controlRequests, [{ subtype: "interrupt", spare_background_tasks: true }]);
+      assert.equal(plainInterrupts.mock.calls.length, 0);
+
+      yield* sessionWithRequest.interrupt;
+      assert.equal(plainInterrupts.mock.calls.length, 1);
+      assert.equal(controlRequests.length, 1);
+
+      const sessionWithoutRequest = yield* runner.open(openInput);
+      yield* Effect.addFinalizer(() => sessionWithoutRequest.close.pipe(Effect.orDie));
+      assert.isDefined(sessionWithoutRequest.interruptKeepingBackgroundWork);
+      yield* sessionWithoutRequest.interruptKeepingBackgroundWork!;
+      assert.equal(fallbackInterrupts.mock.calls.length, 1);
+    }).pipe(Effect.provide(realQueryRunner)),
+);
+
 function fakeClaudeCli(script: string): string {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-claude-cli-"));
   const cli = NodePath.join(dir, "claude");

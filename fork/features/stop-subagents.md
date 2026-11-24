@@ -31,8 +31,8 @@ This fork ports PR #16852 for the shared stop-scope pipeline and Claude, adapted
   - When the provider emits `turn.terminal` with `status: "interrupted"` and `backgroundWorkContinues: true`, `RunExecutionService` skips cascading run-owned subagents to `interrupted`, keeps ingesting late updates until the work finishes, and prevents a newer run from inheriting those items.
   - `thread.background-work.settle` checks `hasPendingBackgroundWorkForThread(providerThread, { includeSubagents: true })` so both background commands and live subagents stay open, while dead sessions or timed-out fallback closes still settle leftover items.
 - **Claude adapter (`apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`):**
-  - Declares `interruptKeepsBackgroundWork: true`.
-  - On `keepBackgroundWork: true`: backgrounds running root foreground subagents via `query.backgroundTasks(toolUseId)` (skipping tasks already in `backgroundedSubagentTaskIds`), then calls `query.interrupt()` without `query.close()`.
+  - Declares `interruptKeepsBackgroundWork: true` and passes `perTaskStopAffordance: true` in `makeClaudeQueryOptions` so Claude Code's `initialize` state spares running background agents and workflows on turn interrupts.
+  - On `keepBackgroundWork: true`: backgrounds running root foreground subagents via `query.backgroundTasks(toolUseId)` (skipping tasks already in `backgroundedSubagentTaskIds`), then sends `{ subtype: "interrupt", spare_background_tasks: true }` without `query.close()` (falling back to `query.interrupt()` when the SDK query runtime has no `request` method).
   - Waits up to 10 seconds for `currentTurn.ended`. If Claude ends the turn, the CLI process stays alive, `backgroundWorkContinues: true` is emitted, and `settledTurnByNativeThread` stays set so surviving work reports normally and individual subagents can still be stopped via `stopSubagent`.
   - If Claude does not end the turn within 10 seconds, the adapter clears the turn-scoped marker and falls back to `query.close()`. If `close()` also times out, it fails with `ProviderAdapterInterruptTimeoutError` so the UI offers **Force stop**.
   - If the CLI exits before settlement or a full Stop arrives mid-wait, the turn-scoped marker is cleared so no dead background work is reported as continuing.
@@ -43,20 +43,21 @@ This fork ports PR #16852 for the shared stop-scope pipeline and Claude, adapted
 
 - The active turn ends with status `Interrupted` (`Stopped by user`). Any foreground tool call cut short by the interrupt shows as `interrupted`, not `failed`.
 - Queued messages stay held until resumed.
-- Surviving background commands, delegated tasks, pull request watches, and any surviving subagents remain listed in the **Running / Waiting** strip above the composer.
+- Surviving background commands, delegated tasks, pull request watches, and surviving native subagents remain listed in the **Running / Waiting** strip above the composer.
 - The strip's **Stop** button is immediately active and stops all remaining background work (and closes the Claude process).
 - If the CLI hangs and ignores Stop, the **Force stop** banner appears as before.
-- Sending a follow-up message reuses the live Claude session without killing background commands.
+- Sending a follow-up message reuses the live Claude session without killing background commands or subagents.
 
 ### What the model sees
 
 - The interrupted foreground tool receives a user-rejected tool result and `[Request interrupted by user for tool use]`, and the turn settles with `error_during_execution` (`terminal_reason: "aborted_tools"` or `"aborted_streaming"`).
-- When a surviving background command finishes later, Claude Code emits `task_notification` and starts a wake turn with the command's result.
+- When a surviving background command or subagent finishes later, Claude Code emits `task_notification` and starts a wake turn with its result.
 
-## Known SDK limitation
+## SDK and CLI behavior
 
-In `@anthropic-ai/claude-agent-sdk` `0.3.321` (Claude Code `2.1.321`), `Query` exposes `interrupt()`, `backgroundTasks(toolUseId?)`, `stopTask(taskId)`, and `close()`. There is no SDK option on `interrupt()` to prevent Claude Code's own CLI interrupt handler from stopping native background `Agent` tasks.
+In `@anthropic-ai/claude-agent-sdk` `0.3.321` (tested with Claude Code `2.1.331`), Claude Code fails closed on a plain `interrupt` unless the client declares `perTaskStopAffordance: true` at `initialize` or sends `spare_background_tasks: true` on the `interrupt` control request. T3 Code sets both: `perTaskStopAffordance: true` in `makeClaudeQueryOptions` and `spare_background_tasks: true` on turn-scoped interrupts (while full Stop still sends a plain `interrupt` followed by `query.close()`).
 
-- **Background Bash commands** survive `query.interrupt()` without `query.close()`, stay on the Waiting strip, and wake the thread on completion.
+- **Background Bash/PowerShell commands** survive turn-scoped Stop, stay on the Waiting strip, and wake the thread on completion.
+- **Claude native subagents (`Agent` tool) and workflows** survive turn-scoped Stop on Claude Code builds that honor `perTaskStopAffordance` or `spare_background_tasks` (including `2.1.331`), stay stoppable individually via `stop_task`, and wake the thread on completion. Older Claude Code CLIs that ignore both flags still fail closed and emit `task_notification` `status: "stopped"`, which T3 renders accurately as cancelled.
 - **T3 delegated tasks (`delegate_task`)** and **pull request watches** survive composer Stop completely and wake the thread on completion.
-- **Claude native subagents (`Agent` tool)**: T3 backgrounds foreground subagents before `query.interrupt()`, keeps the CLI process open, and will keep any native subagent running if the Claude CLI preserves it across `interrupt()`. However, current Claude Code CLI versions (`2.1.292` through `2.1.323`) kill native background `Agent` tasks inside their own `interrupt` handler even without `query.close()`. When the CLI emits `task_notification` with `status: "stopped"` for those agents, T3 shows them as cancelled accurately. If you want to detach a single foreground Bash call or subagent without calling `interrupt()` at all, use **Move to background** (`Ctrl+B`) instead of Stop.
+- If you want to detach a single foreground Bash/PowerShell call or subagent without ending the turn, use **Move to background** (`Ctrl+B`) instead of Stop.

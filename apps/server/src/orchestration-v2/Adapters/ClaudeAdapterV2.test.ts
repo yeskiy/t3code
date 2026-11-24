@@ -3749,6 +3749,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   const makeWakeHarnessWithOptions = (options?: {
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
     readonly interrupt?: Effect.Effect<void, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
+    readonly interruptKeepingBackgroundWork?: Effect.Effect<
+      void,
+      ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError
+    >;
     readonly setPermissionMode?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["setPermissionMode"];
     readonly setModel?: (
       model: string,
@@ -3958,6 +3962,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 listPermissionRules: options?.mcp?.listPermissionRules ?? Effect.succeed([]),
                 stopTask: options?.stopTask ?? (() => Effect.void),
                 interrupt: options?.interrupt ?? Effect.void,
+                ...(options?.interruptKeepingBackgroundWork === undefined
+                  ? {}
+                  : { interruptKeepingBackgroundWork: options.interruptKeepingBackgroundWork }),
                 close: options?.close?.(sdkMessages) ?? Effect.void,
               };
             }),
@@ -6860,6 +6867,173 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.isFalse(yield* harness.hasPendingBackgroundWork);
         }).pipe(Effect.provide(provideStopTest)),
       ),
+    );
+
+    it("declares perTaskStopAffordance so Claude Code spares background tasks on turn interrupt", () => {
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "native-thread-per-task-stop",
+        resume: false,
+        cwd: "/workspace",
+      });
+      assert.equal(options.perTaskStopAffordance, true);
+      assert.equal(ClaudeAdapterV2.loggedClaudeQueryOptions(options).perTaskStopAffordance, true);
+    });
+
+    it.effect(
+      "uses the spare-background interrupt for turn-scoped Stop so a background subagent survives and wakes later",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            let plainInterrupts = 0;
+            let spareInterrupts = 0;
+            let closes = 0;
+            const interruptSent = yield* Deferred.make<void>();
+            const harness = yield* makeWakeHarnessWithOptions({
+              // Simulate Claude CLI 2.1.331: bare interrupt kills background agents, spare_background_tasks preserves them.
+              interrupt: Effect.gen(function* () {
+                plainInterrupts++;
+                yield* Deferred.succeed(interruptSent, undefined);
+              }),
+              interruptKeepingBackgroundWork: Effect.gen(function* () {
+                spareInterrupts++;
+                yield* Deferred.succeed(interruptSent, undefined);
+              }),
+              close: (sdkMessages) =>
+                Effect.sync(() => {
+                  closes++;
+                }).pipe(Effect.andThen(Queue.shutdown(sdkMessages))),
+            });
+            const attemptId = RunAttemptId.make("attempt-claude-spare-bg-subagent");
+            yield* harness.runtime.startTurn(
+              makeClaudeTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now: yield* DateTime.now,
+                attemptId,
+                text: "Run a subagent and a foreground wait.",
+                attachments: [],
+              }),
+            );
+            yield* harness.offerAndWait(
+              claudeSdkFrame({
+                type: "system",
+                subtype: "task_started",
+                task_id: "agent-bg-spared",
+                tool_use_id: "toolu-agent-bg-spared",
+                description: "Run 600s foreground ping wait",
+                subagent_type: "general-purpose",
+                is_backgrounded: true,
+                task_type: "local_agent",
+                uuid: "00000000-0000-4000-8000-000000038930",
+                session_id: WAKE_NATIVE_SESSION,
+              }),
+            );
+            yield* harness.offerAndWait(
+              claudeSdkFrame({
+                type: "system",
+                subtype: "task_started",
+                task_id: "fg-shell-stopped",
+                tool_use_id: "toolu-fg-shell-stopped",
+                description: "Wait about 600 seconds in the foreground with ping",
+                is_backgrounded: false,
+                task_type: "local_bash",
+                uuid: "00000000-0000-4000-8000-000000038931",
+                session_id: WAKE_NATIVE_SESSION,
+              }),
+            );
+
+            const stop = yield* harness.runtime
+              .interruptTurn({
+                providerThread: harness.providerThread,
+                providerTurnId: yield* providerTurnIdOf(attemptId),
+                keepBackgroundWork: true,
+              })
+              .pipe(Effect.forkScoped);
+            yield* Deferred.await(interruptSent);
+            if (plainInterrupts > 0) {
+              // Bare interrupt without spare_background_tasks causes Claude CLI to kill the background subagent.
+              yield* Queue.offer(
+                harness.sdkMessages,
+                claudeSdkFrame({
+                  type: "system",
+                  subtype: "task_notification",
+                  task_id: "agent-bg-spared",
+                  tool_use_id: "toolu-agent-bg-spared",
+                  status: "stopped",
+                  summary: "Run 600s foreground ping wait",
+                  uuid: "00000000-0000-4000-8000-000000038932",
+                  session_id: WAKE_NATIVE_SESSION,
+                }),
+              );
+            }
+            yield* Queue.offer(
+              harness.sdkMessages,
+              claudeSdkFrame({
+                type: "system",
+                subtype: "task_notification",
+                task_id: "fg-shell-stopped",
+                tool_use_id: "toolu-fg-shell-stopped",
+                status: "stopped",
+                summary: "Wait about 600 seconds in the foreground with ping",
+                uuid: "00000000-0000-4000-8000-000000038933",
+                session_id: WAKE_NATIVE_SESSION,
+              }),
+            );
+            yield* Queue.offer(
+              harness.sdkMessages,
+              makeResultFrame({
+                uuid: "00000000-0000-4000-8000-000000038934",
+                result: "",
+                subtype: "error_during_execution",
+                isError: true,
+                terminalReason: "aborted_tools",
+              }),
+            );
+            yield* Fiber.join(stop);
+            const terminal = yield* Queue.take(harness.terminalReceipts);
+
+            assert.equal(spareInterrupts, 1);
+            assert.equal(plainInterrupts, 0);
+            assert.equal(closes, 0);
+            assert.isTrue(terminal.status === "interrupted" && terminal.backgroundWorkContinues);
+            assert.isTrue(
+              yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread, {
+                includeSubagents: true,
+              }),
+            );
+            const latestAgentStatus = () =>
+              harness.events
+                .filter((event) => event.type === "subagent.updated")
+                .findLast((event) => event.subagent.nativeTaskRef?.nativeId === "agent-bg-spared")
+                ?.subagent.status;
+            assert.equal(latestAgentStatus(), "running");
+
+            // Later completion of the spared background subagent settles it and requests a wake turn.
+            yield* harness.offerAndWait(
+              claudeSdkFrame({
+                type: "system",
+                subtype: "task_notification",
+                task_id: "agent-bg-spared",
+                tool_use_id: "toolu-agent-bg-spared",
+                status: "completed",
+                summary: "done",
+                uuid: "00000000-0000-4000-8000-000000038935",
+                session_id: WAKE_NATIVE_SESSION,
+              }),
+            );
+            const wake = yield* Queue.take(harness.continuationReceipts);
+            yield* Queue.take(harness.subagentReceipts).pipe(
+              Effect.repeat({
+                until: (event) =>
+                  event.subagent.nativeTaskRef?.nativeId === "agent-bg-spared" &&
+                  event.subagent.status !== "running",
+              }),
+            );
+            assert.equal(wake.threadId, harness.threadId);
+            assert.equal(latestAgentStatus(), "completed");
+          }).pipe(Effect.provide(provideStopTest)),
+        ),
     );
   });
 
