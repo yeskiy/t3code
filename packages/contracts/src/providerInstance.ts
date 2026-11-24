@@ -2,6 +2,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+// fork: per-instance idle process timeout
+import { ForkInstanceIdleTimeoutFields } from "./forkInstanceIdleTimeout.ts";
 import { SecretReference } from "./secretReference.ts";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
@@ -79,6 +81,8 @@ export const ProviderInstanceConfig = Schema.Struct({
   environment: Schema.optionalKey(ProviderInstanceEnvironment),
   enabled: Schema.optionalKey(Schema.Boolean),
   config: Schema.optionalKey(Schema.Unknown),
+  // fork: per-instance idle process timeout
+  ...ForkInstanceIdleTimeoutFields,
 });
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
 

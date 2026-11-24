@@ -73,6 +73,8 @@ const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boole
 const withoutPresentation = ({
   displayName: _displayName,
   accentColor: _accentColor,
+  // fork: per-instance idle process timeout
+  idleTimeoutMinutes: _idleTimeoutMinutes,
   ...runtime
 }: ProviderInstanceConfig) => runtime;
 

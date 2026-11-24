@@ -6183,3 +6183,182 @@ it.effect("ProviderSessionManagerV2 gives a delegated child its project's device
     assert.isTrue(child?.capabilities?.has("device"));
   }),
 );
+
+// fork: per-instance idle process timeout
+it.effect(
+  "ProviderSessionManagerV2 uses the provider instance idleTimeoutMinutes when options.idleTimeoutMs is absent",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const nativeResumeCapabilities: OrchestrationV2ProviderCapabilities = {
+        ...CodexCapabilities,
+        turns: { ...CodexCapabilities.turns, supportsNativeResume: true },
+      };
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-instance-idle-timeout-configured");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+        yield* TestClock.adjust("14 minutes");
+        assert.isTrue(yield* manager.isLive(providerSessionId));
+        assert.equal((yield* Ref.get(state)).closeCount, 0);
+
+        yield* TestClock.adjust("1 minute");
+        assert.isFalse(yield* manager.isLive(providerSessionId));
+        assert.equal((yield* Ref.get(state)).closeCount, 1);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            capabilities: nativeResumeCapabilities,
+            serverSettingsLayer: ServerSettings.layerTest({
+              providerInstances: {
+                [modelSelection.instanceId]: {
+                  driver: CODEX_DRIVER,
+                  idleTimeoutMinutes: 15,
+                },
+              },
+            }),
+          }),
+        ),
+      );
+    }),
+);
+
+// fork: per-instance idle process timeout
+it.effect(
+  "ProviderSessionManagerV2 keeps default 2 minute and 30 minute idle timeouts when idleTimeoutMinutes is absent",
+  () =>
+    Effect.gen(function* () {
+      const nativeState = yield* Ref.make(emptyState);
+      const nativeResumeCapabilities: OrchestrationV2ProviderCapabilities = {
+        ...CodexCapabilities,
+        turns: { ...CodexCapabilities.turns, supportsNativeResume: true },
+      };
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-instance-idle-timeout-default-native");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+        yield* TestClock.adjust("119 seconds");
+        assert.isTrue(yield* manager.isLive(providerSessionId));
+
+        yield* TestClock.adjust("1 second");
+        assert.isFalse(yield* manager.isLive(providerSessionId));
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state: nativeState,
+            capabilities: nativeResumeCapabilities,
+            serverSettingsLayer: ServerSettings.layerTest({
+              providerInstances: {
+                [modelSelection.instanceId]: { driver: CODEX_DRIVER },
+              },
+            }),
+          }),
+        ),
+      );
+
+      const noResumeState = yield* Ref.make(emptyState);
+      const noResumeCapabilities: OrchestrationV2ProviderCapabilities = {
+        ...CodexCapabilities,
+        turns: { ...CodexCapabilities.turns, supportsNativeResume: false },
+      };
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-instance-idle-timeout-default-no-resume");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+        yield* TestClock.adjust("29 minutes");
+        assert.isTrue(yield* manager.isLive(providerSessionId));
+
+        yield* TestClock.adjust("1 minute");
+        assert.isFalse(yield* manager.isLive(providerSessionId));
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state: noResumeState,
+            capabilities: noResumeCapabilities,
+            serverSettingsLayer: ServerSettings.layerTest({
+              providerInstances: {
+                [modelSelection.instanceId]: { driver: CODEX_DRIVER },
+              },
+            }),
+          }),
+        ),
+      );
+    }),
+);
+
+// fork: per-instance idle process timeout
+it.effect(
+  "ProviderSessionManagerV2 gives options.idleTimeoutMs higher priority than instance idleTimeoutMinutes",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-instance-idle-timeout-option-priority");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+        yield* TestClock.adjust("1 second");
+        assert.isFalse(yield* manager.isLive(providerSessionId));
+        assert.equal((yield* Ref.get(state)).closeCount, 1);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1_000,
+            serverSettingsLayer: ServerSettings.layerTest({
+              providerInstances: {
+                [modelSelection.instanceId]: {
+                  driver: CODEX_DRIVER,
+                  idleTimeoutMinutes: 15,
+                },
+              },
+            }),
+          }),
+        ),
+      );
+    }),
+);

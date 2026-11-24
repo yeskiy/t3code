@@ -58,6 +58,11 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import { applyForkMcpSessionCapabilities } from "../fork/mcpScope/McpScopeGuard.ts"; // fork: per-provider MCP tool scope
+// fork: per-instance idle process timeout
+import {
+  readInstanceIdleTimeoutMinutes,
+  resolveInstanceIdleTimeoutMs,
+} from "../fork/instanceIdleTimeout/resolveInstanceIdleTimeout.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import {
@@ -579,14 +584,35 @@ export const layerWithOptions = (
         readonly providerSessionId: ProviderSessionId;
         readonly threadId: ThreadId;
       }) => `${input.providerSessionId}\u0000${input.threadId}`;
-      const idleTimeoutFor = (runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime) =>
-        Math.max(
-          1,
-          options.idleTimeoutMs ??
-            (runtime.providerSession.capabilities.turns.supportsNativeResume === true
-              ? DEFAULT_IDLE_TIMEOUT_MS
-              : NO_NATIVE_RESUME_IDLE_TIMEOUT_MS),
+      // fork: per-instance idle process timeout
+      const idleTimeoutFor = (
+        runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime,
+      ): Effect.Effect<number> => {
+        const supportsNativeResume =
+          runtime.providerSession.capabilities.turns.supportsNativeResume === true;
+        if (options.idleTimeoutMs !== undefined || Option.isNone(serverSettings)) {
+          return Effect.succeed(
+            resolveInstanceIdleTimeoutMs({
+              optionsIdleTimeoutMs: options.idleTimeoutMs,
+              supportsNativeResume,
+              defaultIdleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
+              noNativeResumeIdleTimeoutMs: NO_NATIVE_RESUME_IDLE_TIMEOUT_MS,
+            }),
+          );
+        }
+        return serverSettings.value.getSettings.pipe(
+          Effect.map((settings) => readInstanceIdleTimeoutMinutes(settings, runtime.instanceId)),
+          Effect.orElseSucceed(() => undefined),
+          Effect.map((instanceIdleTimeoutMinutes) =>
+            resolveInstanceIdleTimeoutMs({
+              instanceIdleTimeoutMinutes,
+              supportsNativeResume,
+              defaultIdleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
+              noNativeResumeIdleTimeoutMs: NO_NATIVE_RESUME_IDLE_TIMEOUT_MS,
+            }),
+          ),
         );
+      };
       const maxIdlePinMs = Math.max(0, options.maxIdlePinMs ?? DEFAULT_MAX_IDLE_PIN_MS);
       interface PreparedMcpCredential {
         readonly mcpCredentialId: string | undefined;
@@ -1731,7 +1757,9 @@ export const layerWithOptions = (
                 providerSessionId: input.providerSessionId,
                 pinnedForMs: now - pinnedSinceMs,
               });
-              yield* Effect.sleep(Duration.millis(idleTimeoutFor(probedRuntime)));
+              // fork: per-instance idle process timeout
+              const deferTimeoutMs = yield* idleTimeoutFor(probedRuntime);
+              yield* Effect.sleep(Duration.millis(deferTimeoutMs));
               return true;
             }
             yield* Effect.logWarning("orchestration-v2.driver-session.idle-release-pin-expired", {
@@ -1803,15 +1831,24 @@ export const layerWithOptions = (
         options?: { readonly providerActivity?: boolean },
       ) {
         const key = sessionKey(providerSessionId);
-        const current = yield* Ref.get(sessions);
-        const entry = current.get(key);
-        if (entry === undefined || entry.busyTurns.size > 0) {
+        const initialEntry = (yield* Ref.get(sessions)).get(key);
+        if (initialEntry === undefined || initialEntry.busyTurns.size > 0) {
+          return;
+        }
+        // fork: per-instance idle process timeout
+        const timeoutMs = yield* idleTimeoutFor(initialEntry.runtime);
+        const entry = (yield* Ref.get(sessions)).get(key);
+        if (
+          entry === undefined ||
+          entry.busyTurns.size > 0 ||
+          entry.runtime !== initialEntry.runtime
+        ) {
           return;
         }
 
         yield* cancelIdleFiber(entry.idleFiber);
         const generation = entry.idleGeneration + 1;
-        const idleFiber = yield* Effect.sleep(Duration.millis(idleTimeoutFor(entry.runtime))).pipe(
+        const idleFiber = yield* Effect.sleep(Duration.millis(timeoutMs)).pipe(
           Effect.andThen(releaseIfStillIdle({ providerSessionId, generation })),
           Effect.forkIn(layerScope),
         );
@@ -2181,7 +2218,9 @@ export const layerWithOptions = (
           const pending = entry.idleThreadUnloads.get(providerThreadId);
           if (pending === undefined) return;
           const generation = pending.generation + 1;
-          const fiber = yield* Effect.sleep(Duration.millis(idleTimeoutFor(entry.runtime))).pipe(
+          // fork: per-instance idle process timeout
+          const timeoutMs = yield* idleTimeoutFor(entry.runtime);
+          const fiber = yield* Effect.sleep(Duration.millis(timeoutMs)).pipe(
             Effect.andThen(
               unloadIdleThread({
                 providerSessionId,
@@ -2270,11 +2309,12 @@ export const layerWithOptions = (
                   : yield* entry.runtime
                       .hasPendingBackgroundWorkForThread(pending.providerThread)
                       .pipe(Effect.catchCause(() => Effect.succeed(false)));
-              if (hasPendingWork) return { retryAfterMs: idleTimeoutFor(entry.runtime) };
+              // fork: per-instance idle process timeout
+              if (hasPendingWork) return { retryAfterMs: yield* idleTimeoutFor(entry.runtime) };
               const child = yield* delegatedChildArchive(input.threadId);
               // Unloading now would miss the archive once the parent takes the result.
               if (child === "awaiting_delivery") {
-                return { retryAfterMs: idleTimeoutFor(entry.runtime) };
+                return { retryAfterMs: yield* idleTimeoutFor(entry.runtime) };
               }
               const archive = child === "ready";
               if (input.archiveOnly === true && !archive) return "skipped" as const;

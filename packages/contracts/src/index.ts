@@ -86,3 +86,5 @@ export * from "./forkMcpScope.ts";
 export * from "./forkDelegationAgent.ts";
 // fork: Claude launch fields
 export * from "./forkInstanceLaunch.ts";
+// fork: per-instance idle process timeout
+export * from "./forkInstanceIdleTimeout.ts";

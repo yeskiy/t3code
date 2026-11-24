@@ -86,6 +86,9 @@ import {
   getProviderVersionLabel,
   providerAuthLabel,
 } from "./providerStatus";
+// fork: per-instance idle process timeout
+import { ForkInstanceIdleTimeoutRow } from "../../fork/instanceIdleTimeout/ForkInstanceIdleTimeoutRow";
+import { withForkInstanceIdleTimeoutMinutes } from "../../fork/instanceIdleTimeout/instanceIdleTimeout.logic";
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -947,6 +950,11 @@ export function ProviderInstanceCard({
     );
   };
 
+  // fork: per-instance idle process timeout
+  const updateIdleTimeoutMinutes = (nextMinutes: ProviderInstanceConfig["idleTimeoutMinutes"]) => {
+    onUpdate(withForkInstanceIdleTimeoutMinutes(instance, nextMinutes));
+  };
+
   const updateEnvironment = (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => {
     const cleaned = environment.filter((variable) => variable.name.trim().length > 0);
     const { environment: _omit, ...rest } = instance;
@@ -1356,6 +1364,15 @@ export function ProviderInstanceCard({
     />
   );
 
+  // fork: per-instance idle process timeout
+  const idleTimeoutRow = (
+    <ForkInstanceIdleTimeoutRow
+      idPrefix={`provider-instance-${instanceId}`}
+      value={instance.idleTimeoutMinutes}
+      onCommit={updateIdleTimeoutMinutes}
+    />
+  );
+
   return (
     <>
       <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
@@ -1437,18 +1454,24 @@ export function ProviderInstanceCard({
             headerPlacement="outside"
           >
             {runtime ?? runtimeFields}
+            {/* fork: per-instance idle process timeout */}
+            {idleTimeoutRow}
           </FoldedSettingsSection>
         </div>
-      ) : !driverOption || deriveProviderSettingsFields(driverOption, undefined, m).length > 0 ? (
+      ) : (
         <SettingsSection
           title={gt("Runtime")}
           inert={readOnly}
           aria-disabled={readOnly || undefined}
           className={readOnly ? "opacity-50 select-none" : undefined}
         >
-          {runtimeFields}
+          {!driverOption || deriveProviderSettingsFields(driverOption, undefined, m).length > 0
+            ? runtimeFields
+            : null}
+          {/* fork: per-instance idle process timeout */}
+          {idleTimeoutRow}
         </SettingsSection>
-      ) : null}
+      )}
 
       <SettingsSection
         title={gt("Environment")}
