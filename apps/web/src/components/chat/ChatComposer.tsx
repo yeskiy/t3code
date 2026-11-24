@@ -463,6 +463,9 @@ export interface ChatComposerProps {
   ) => void;
   onResume: () => void;
   onInterrupt: () => void;
+  // fork: stop-scope tooltip/aria-label and confirmation guard
+  stopLabel?: string | undefined;
+  stopRequiresConfirm?: boolean | undefined;
   onSelectActivePendingUserInputOption: (questionId: string, optionValue: string) => void;
   onAdvanceActivePendingUserInput: () => void;
   onDismissActivePendingUserInput: (requestId: RuntimeRequestId) => void;
@@ -565,6 +568,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onSend,
     onResume,
     onInterrupt,
+    stopLabel,
+    stopRequiresConfirm,
     onSelectActivePendingUserInputOption,
     onAdvanceActivePendingUserInput,
     onDismissActivePendingUserInput,
@@ -3574,6 +3579,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   hasSendableContent={composerSendState.hasSendableContent}
                   isEditingQueuedMessage={isEditingQueuedMessage}
                   onInterrupt={handleInterruptPrimaryActionStable}
+                  {...(stopLabel === undefined ? {} : { stopLabel })}
+                  {...(stopRequiresConfirm === undefined ? {} : { stopRequiresConfirm })}
                 >
                   <button
                     type="button"
@@ -3897,6 +3904,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryActionStable}
+                    {...(stopLabel === undefined ? {} : { stopLabel })}
+                    {...(stopRequiresConfirm === undefined ? {} : { stopRequiresConfirm })}
                     compactBeforeSendTokens={props.resumeCompactionTokens}
                     hideCompactToggle={dictationTakesFooter}
                     keepFullHistory={props.keepFullHistory}

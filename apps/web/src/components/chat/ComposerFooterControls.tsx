@@ -221,6 +221,9 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   onResume: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  // fork: stop-scope tooltip/aria-label and confirmation guard
+  stopLabel?: string | undefined;
+  stopRequiresConfirm?: boolean | undefined;
   compactBeforeSendTokens: number | null;
   hideCompactToggle: boolean;
   keepFullHistory: boolean;
@@ -251,6 +254,10 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         onResume={props.onResume}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
+        {...(props.stopLabel === undefined ? {} : { stopLabel: props.stopLabel })}
+        {...(props.stopRequiresConfirm === undefined
+          ? {}
+          : { stopRequiresConfirm: props.stopRequiresConfirm })}
         compactBeforeSendTokens={props.compactBeforeSendTokens}
         hideCompactToggle={props.hideCompactToggle}
         keepFullHistory={props.keepFullHistory}
