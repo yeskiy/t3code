@@ -14380,6 +14380,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 return true;
               }
             }
+            // fork: keep Claude session alive while an owed wake turn is pending
+            for (const nativeThreadId of (yield* Ref.get(
+              lastProviderThreadByNativeThread,
+            )).keys()) {
+              if ((yield* owedWakeTasksForNativeThread(nativeThreadId)).length > 0) {
+                return true;
+              }
+            }
             for (const subagent of (yield* Ref.get(sessionSubagentsByTaskId)).values()) {
               if (subagent.task.status === "running") {
                 return true;
