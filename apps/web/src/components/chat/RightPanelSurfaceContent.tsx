@@ -37,6 +37,12 @@ const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+// fork: keep the artifacts viewer out of the initial chat chunk until opened
+const ForkArtifactsPanel = lazy(() =>
+  import("../../fork/artifacts/ForkArtifactsPanel").then((module) => ({
+    default: module.ForkArtifactsPanel,
+  })),
+);
 
 type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -215,6 +221,12 @@ export function RightPanelSurfaceContent(props: {
       );
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
+    case "artifacts": // fork: artifacts panel
+      return (
+        <Suspense fallback={null}>
+          <ForkArtifactsPanel environmentId={props.environmentId} threadRef={threadRef} />
+        </Suspense>
+      );
     case "thread":
       // Not lazy: revealing a suspended tiptap editor tears down its view and crashes the composer.
       return (

@@ -32,6 +32,7 @@ const RIGHT_PANEL_KINDS = [
   "issue",
   "thread",
   "linked-thread",
+  "artifacts", // fork: artifacts panel
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -109,7 +110,8 @@ export type RightPanelSurface =
    */
   | ThreadSurface
   /** A linked environment's thread, read through `viaEnvironmentId`; it has no thread here. */
-  | LinkedThreadSurface;
+  | LinkedThreadSurface
+  | { id: "artifacts"; kind: "artifacts" }; // fork: artifacts panel
 
 export type ThreadSurface = { id: `thread:${string}`; kind: "thread"; threadId: ThreadId };
 
@@ -299,6 +301,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "device":
       return { id: "device", kind };
+    case "artifacts": // fork: artifacts panel
+      return { id: "artifacts", kind };
   }
 };
 

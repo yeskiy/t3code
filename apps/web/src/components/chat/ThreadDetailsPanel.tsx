@@ -48,6 +48,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { ForkThreadDetailsArtifactsRow } from "~/fork/artifacts/ForkThreadDetailsArtifactsRow"; // fork: artifacts panel
 
 interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
@@ -326,6 +327,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {visible.context && props.usage.contextWindow ? (
                 <ThreadDetailsContext usage={props.usage.contextWindow} />
+              ) : null}
+
+              {/* fork: artifacts quick link in thread details */}
+              {!props.draftId ? (
+                <ForkThreadDetailsArtifactsRow threadRef={activeThreadRef} />
               ) : null}
 
               {/* Shown only when no section above has content, so an emptied card can be refilled. */}

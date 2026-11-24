@@ -49,6 +49,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  Layers, // fork: artifacts panel
   MessagesSquare,
   Plus,
   TerminalSquare,
@@ -159,6 +160,8 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  // fork: artifacts panel
+  onAddArtifacts?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -167,6 +170,7 @@ export interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
   sideChatAvailable?: boolean;
+  artifactsAvailable?: boolean; // fork: artifacts panel
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
@@ -196,6 +200,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: msg("This thread has no linked items."),
   device: msg("Devices are only available from a thread."),
   sideChat: msg("Side chats start after the first message."),
+  artifacts: msg("Artifacts are available once a thread starts."), // fork: artifacts panel
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -221,6 +226,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: msg("No linked items available."),
   device: msg("Available from a thread."),
   sideChat: msg("Available after the first message."),
+  artifacts: msg("Available once a thread starts."), // fork: artifacts panel
 } as const;
 
 type TabContextMenuAction =
@@ -345,6 +351,7 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddArtifacts?: (() => void) | undefined; // fork: artifacts panel
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -354,6 +361,7 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   sideChatAvailable: boolean;
   sideChatDisabledReason: string | null;
+  artifactsAvailable: boolean; // fork: artifacts panel
 }) {
   const gt = useGT();
   const messages = useMessages();
@@ -428,6 +436,19 @@ function RightPanelEmptyState(props: {
             disabledReason:
               props.sideChatDisabledReason ?? messages(SURFACE_UNAVAILABLE_HINTS.sideChat),
             onClick: props.onAddSideChat,
+          },
+        ]
+      : []),
+    // fork: artifacts panel
+    ...(props.onAddArtifacts
+      ? [
+          {
+            label: msg("Artifacts"),
+            icon: Layers,
+            shortcut: "A",
+            available: props.artifactsAvailable,
+            disabledReason: messages(SURFACE_UNAVAILABLE_HINTS.artifacts),
+            onClick: props.onAddArtifacts,
           },
         ]
       : []),
@@ -617,6 +638,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return resolve(msg("Linked items"));
+    case "artifacts": // fork: artifacts panel
+      return resolve(msg("Artifacts"));
     case "issue":
       // A git host numbers its issues; a tracker with keys of its own, such as Linear, names them.
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
@@ -718,6 +741,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "artifacts": // fork: artifacts panel
+      return <Layers className="size-3 shrink-0" />;
     case "issue":
       return <IssueSurfaceIcon surface={surface} environmentId={environmentId} />;
     case "thread":
@@ -1272,6 +1297,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
+    // fork: artifacts panel
+    ...(props.onAddArtifacts
+      ? [
+          {
+            label: msg("Artifacts"),
+            icon: Layers,
+            shortcut: "A",
+            available: props.artifactsAvailable === true,
+            disabledReason: messages(SURFACE_DISABLED_REASONS.artifacts),
+            onClick: props.onAddArtifacts,
+          },
+        ]
+      : []),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1693,6 +1731,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
+            onAddArtifacts={props.onAddArtifacts}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1702,6 +1741,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             deviceAvailable={props.deviceAvailable}
             sideChatAvailable={props.sideChatAvailable === true}
             sideChatDisabledReason={props.sideChatDisabledReason ?? null}
+            artifactsAvailable={props.artifactsAvailable === true}
           />
         ) : (
           props.children

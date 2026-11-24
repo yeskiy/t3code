@@ -18,6 +18,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { HtmlRenderDialog } from "./HtmlRenderDialog";
 import { observeResize } from "~/lib/observeResize";
+import { ForkArtifactOpenButton } from "~/fork/artifacts/ForkArtifactOpenButton"; // fork: artifacts panel
 
 const MIN_URL_LIFE_MS = 5 * 60_000;
 const MAX_MEASURED_CONTENT_HEIGHTS = 200;
@@ -100,6 +101,8 @@ export function HtmlRenderFrame(props: {
             onFullscreenChange={onFullscreenChange}
           />
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
+            {/* fork: open inline render in the artifacts right panel */}
+            <ForkArtifactOpenButton threadRef={props.threadRef} attachmentId={attachmentId} />
             <Tooltip>
               <TooltipTrigger
                 render={
