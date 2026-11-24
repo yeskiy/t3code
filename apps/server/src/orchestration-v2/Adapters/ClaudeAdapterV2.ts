@@ -755,6 +755,8 @@ export interface ClaudeAgentSdkQuerySession {
     ClaudeAgentSdkQueryRunnerError
   >;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  // fork: turn-scoped interrupt that asks Claude Code to spare background agents and workflows.
+  readonly interruptKeepingBackgroundWork?: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
 
@@ -963,6 +965,7 @@ async function sendClaudeControlRequest(
   queryRuntime: ClaudeQuery,
   request: {
     readonly subtype:
+      | "interrupt"
       | "mcp_call"
       | "list_permission_rules"
       | "rename_session"
@@ -1146,6 +1149,7 @@ export interface ClaudeAgentSdkLoggedQueryOptions {
   readonly settingKeys?: ReadonlyArray<string>;
   readonly effort?: ClaudeAgentSdkQueryOptions["effort"];
   readonly includePartialMessages?: true;
+  readonly perTaskStopAffordance?: true;
   readonly pathToClaudeCodeExecutable?: ClaudeAgentSdkQueryOptions["pathToClaudeCodeExecutable"];
   readonly hasExtraArgs?: true;
   readonly allowDangerouslySkipPermissions?: true;
@@ -1224,6 +1228,7 @@ export type ClaudeAgentSdkProtocolLogEvent =
       readonly stage: "decoded";
       readonly payload: {
         readonly type: "query.interrupt";
+        readonly spareBackgroundTasks?: true;
       };
     }
   | {
@@ -1296,6 +1301,7 @@ export function loggedClaudeQueryOptions(
       : {}),
     ...(options.effort === undefined ? {} : { effort: options.effort }),
     ...(options.includePartialMessages === true ? { includePartialMessages: true } : {}),
+    ...(options.perTaskStopAffordance === true ? { perTaskStopAffordance: true } : {}),
     ...(options.pathToClaudeCodeExecutable === undefined
       ? {}
       : { pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable }),
@@ -2019,6 +2025,29 @@ export const layerQueryRunner: Layer.Layer<
             }),
           ),
         ),
+        // fork: turn-scoped Stop sends spare_background_tasks so Claude CLI spares background tasks.
+        interruptKeepingBackgroundWork: Effect.tryPromise({
+          try: () =>
+            typeof Reflect.get(queryRuntime, "request") === "function"
+              ? sendClaudeControlRequest(queryRuntime, {
+                  subtype: "interrupt",
+                  spare_background_tasks: true,
+                })
+              : queryRuntime.interrupt(),
+          catch: (cause) => queryRunnerError(cause, "interrupt"),
+        }).pipe(
+          Effect.asVoid,
+          Effect.tap(() =>
+            logProtocolEvent({
+              direction: "outgoing",
+              stage: "decoded",
+              payload: {
+                type: "query.interrupt",
+                spareBackgroundTasks: true,
+              },
+            }),
+          ),
+        ),
         // A job started since the last poll is recorded before the CLI is told to exit.
         close: Effect.suspend(() => (processExited ? Effect.void : refreshDescendants)).pipe(
           Effect.andThen(Queue.shutdown(promptQueue)),
@@ -2418,6 +2447,8 @@ export function makeClaudeQueryOptions(input: {
         ? "bypassPermissions"
         : (input.permissionMode ?? "default")),
     includePartialMessages: true,
+    // fork: T3 renders per-task stop controls, so Claude interrupt spares background agents and workflows.
+    perTaskStopAffordance: true,
     promptSuggestions: input.promptSuggestions === true,
     ...(compiledSelection.effort === undefined
       ? {}
@@ -14031,7 +14062,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               next.add(turnInput.providerTurnId);
               return next;
             });
-            const sendInterrupt = existing.query.interrupt.pipe(
+            const sendInterrupt = (
+              keepBackgroundWork
+                ? (existing.query.interruptKeepingBackgroundWork ?? existing.query.interrupt)
+                : existing.query.interrupt
+            ).pipe(
               Effect.timeoutOption("10 seconds"),
               // Teardown can close the CLI between the check and the write.
               Effect.catch((error) =>
