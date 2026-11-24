@@ -222,10 +222,8 @@ import {
   type ClaudeScopedLimitNames,
 } from "../../provider/claudeUsageLimits.ts";
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
-import {
-  T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
-  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+// fork: delegate-only bullet derives from T3_CODE_ORCHESTRATION_INSTRUCTIONS in forkOrchestrationInstructions.ts
+import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
@@ -247,6 +245,15 @@ import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriverCreateInput,
 } from "@t3tools/provider-core/server/adapterDriver";
+// fork: per-instance launch
+import {
+  forkDisallowedToolsOption,
+  forkExtraArgsOption,
+  makeForkClaudeLaunchResolver,
+  type ForkClaudeLaunch,
+  type ForkClaudeLaunchResolver,
+} from "../../fork/instanceLaunch/ForkClaudeLaunch.ts";
+import { forkOrchestrationInstructions } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
 import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
@@ -2583,6 +2590,8 @@ export function makeClaudeQueryOptions(input: {
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
+  // fork: per-instance launch
+  readonly forkLaunch?: ForkClaudeLaunch;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection, input.modelCatalog);
   const {
@@ -2696,7 +2705,8 @@ export function makeClaudeQueryOptions(input: {
     ...threadIdentity,
     ...(input.resumeSessionAt === undefined ? {} : { resumeSessionAt: input.resumeSessionAt }),
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
-    ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
+    // fork: per-instance launch
+    ...forkDisallowedToolsOption(input.disallowedTools, input.forkLaunch),
     ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
     ...(input.allowDangerouslySkipPermissions === true
       ? { allowDangerouslySkipPermissions: true }
@@ -2736,13 +2746,16 @@ export function makeClaudeQueryOptions(input: {
         }) +
           (input.mcpServers === undefined
             ? ""
-            : T3_CODE_ORCHESTRATION_INSTRUCTIONS +
+            : // fork: delegate-only bullet when the instance disallows Agent
+              forkOrchestrationInstructions(input.forkLaunch?.nativeAgentOff === true) +
               CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
               CLAUDE_SEND_TO_USER_INSTRUCTIONS +
               (deviceInstructions
                 ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n`
                 : "")),
         ...launchAppendSystemPrompt,
+        // fork: per-instance launch
+        ...(input.forkLaunch?.appendText === undefined ? [] : [input.forkLaunch.appendText]),
       ].join("\n\n"),
     },
     ...(deviceInstructions || input.onStop !== undefined
@@ -2758,7 +2771,8 @@ export function makeClaudeQueryOptions(input: {
     ...(pluginDirectories.length === 0
       ? {}
       : { plugins: pluginDirectories.map((path) => ({ type: "local" as const, path })) }),
-    ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
+    // fork: per-instance launch
+    ...forkExtraArgsOption(extraArgs, input.forkLaunch),
   };
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
@@ -6035,6 +6049,8 @@ export interface ClaudeAdapterV2Options {
     ) => Effect.Effect<void>;
   };
   readonly installationGate?: ProviderInstallationGate.ProviderInstallationGate["Service"];
+  // fork: per-instance launch
+  readonly forkClaudeLaunch?: ForkClaudeLaunchResolver;
 }
 
 export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
@@ -13766,8 +13782,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             compiledSelection = compileClaudeModelSelection(turnInput.modelSelection, catalog);
           }
 
-          // Read before closing the live process so a bad path leaves it running.
-          const [appendSystemPromptFileText, toolSearchOverride] = yield* Effect.all(
+          // fork: per-instance launch, before the live process closes
+          const [appendSystemPromptFileText, toolSearchOverride, forkLaunch] = yield* Effect.all(
             [
               readClaudeAppendSystemPromptFile({
                 settings: adapterOptions.settings,
@@ -13776,6 +13792,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 path,
               }),
               resolveToolSearchOverride(turnInput.runtimePolicy.cwd, launchArgSettings),
+              adapterOptions.forkClaudeLaunch?.resolve({ cwd: turnInput.runtimePolicy.cwd }) ??
+                Effect.undefined,
             ],
             { concurrency: "unbounded" },
           );
@@ -13847,6 +13865,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             supportedDialogKinds: ["resume_return"],
             ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
+            // fork: per-instance launch
+            ...(forkLaunch === undefined ? {} : { forkLaunch }),
           });
           const resolvedTurnCwd = yield* fileSystem
             .realPath(turnInput.runtimePolicy.cwd ?? ".")
@@ -15897,6 +15917,13 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       queryRunner,
       continuationRequests,
       installationGate,
+      // fork: per-instance launch
+      forkClaudeLaunch: yield* makeForkClaudeLaunchResolver({
+        instanceId,
+        settings: config,
+        environment: claudeEnvironment,
+        stateDir: serverConfig.stateDir,
+      }),
       ...hooks,
     });
   },

@@ -54,6 +54,10 @@ import {
   ProviderDriverKind,
 } from "./providerInstance.ts";
 import { ForkMcpScopes, ForkMcpScopesPatch } from "./forkMcpScope.ts"; // fork: per-provider MCP tool scope
+import {
+  FORK_CLAUDE_LAUNCH_SETTINGS_ORDER,
+  ForkClaudeLaunchSettingsFields,
+} from "./forkInstanceLaunch.ts"; // fork: Claude launch fields
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 import {
   CloudSpeechModelId,
@@ -865,9 +869,19 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    // fork: Claude launch fields
+    ...ForkClaudeLaunchSettingsFields,
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "idleCompaction", "launchArgs"],
+    // fork: Claude launch fields
+    order: [
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "idleCompaction",
+      "launchArgs",
+      ...FORK_CLAUDE_LAUNCH_SETTINGS_ORDER,
+    ],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;

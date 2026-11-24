@@ -123,6 +123,8 @@ import {
   PROVIDER_RETRY_BUDGET_MS,
 } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
+// fork: delegate-only instructions
+import { FORK_DELEGATE_ONLY_BULLET } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderInstallationGate from "../../provider/ProviderInstallationGate.ts";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
@@ -406,6 +408,69 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.equal(options.permissionMode, expected);
     assert.isUndefined(options.extraArgs?.["permission-mode"]);
     assert.isUndefined(options.extraArgs?.["dangerously-skip-permissions"]);
+  });
+
+  // fork: per-instance launch
+  it("applies the fork launch: merged MCP file, tool limits, and agent text", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-launch-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: {
+        ...DEFAULT_CLAUDE_SETTINGS,
+        launchArgs: "--mcp-config old.json --disallowedTools Agent",
+      },
+      forkLaunch: {
+        mcpConfigPath: "C:/state/fork/mcp/claudeAgent.json",
+        disallowedTools: ["Agent"],
+        appendText: "AGENT TEXT",
+        nativeAgentOff: true,
+      },
+    });
+    assert.equal(options.extraArgs?.["mcp-config"], "C:/state/fork/mcp/claudeAgent.json");
+    assert.isUndefined(options.extraArgs?.disallowedTools);
+    assert.deepEqual(options.disallowedTools, ["Agent"]);
+    assert.include(
+      typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+        ? (options.systemPrompt.append ?? "")
+        : "",
+      "AGENT TEXT",
+    );
+  });
+
+  // fork: delegate-only instructions
+  it("swaps the native subagent bullet when forkLaunch marks native Agent off", () => {
+    const mcpServers = { "t3-code": { type: "http" as const, url: "http://127.0.0.1/mcp" } };
+    const withAgentOff = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-delegate-only-off",
+      resume: false,
+      cwd: "/workspace",
+      mcpServers,
+      forkLaunch: { nativeAgentOff: true },
+    });
+    const offAppend =
+      typeof withAgentOff.systemPrompt === "object" && "append" in withAgentOff.systemPrompt
+        ? (withAgentOff.systemPrompt.append ?? "")
+        : "";
+    assert.include(offAppend, FORK_DELEGATE_ONLY_BULLET);
+    assert.notInclude(offAppend, "Claude `Agent`");
+
+    const withoutForkLaunch = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-delegate-only-default",
+      resume: false,
+      cwd: "/workspace",
+      mcpServers,
+    });
+    const defaultAppend =
+      typeof withoutForkLaunch.systemPrompt === "object" &&
+      "append" in withoutForkLaunch.systemPrompt
+        ? (withoutForkLaunch.systemPrompt.append ?? "")
+        : "";
+    assert.include(defaultAppend, "Claude `Agent`");
+    assert.notInclude(defaultAppend, FORK_DELEGATE_ONLY_BULLET);
   });
 
   it("passes the thread's other folders and every --add-dir and --plugin-dir launch directory to Claude", () => {

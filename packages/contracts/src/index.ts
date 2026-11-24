@@ -84,3 +84,5 @@ export * from "./forkToolCall.ts";
 export * from "./forkMcpScope.ts";
 // fork: neutral delegation agent definitions
 export * from "./forkDelegationAgent.ts";
+// fork: Claude launch fields
+export * from "./forkInstanceLaunch.ts";
