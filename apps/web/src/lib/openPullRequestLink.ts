@@ -101,11 +101,18 @@ export function useOpenChangeRequestLink(
   });
   const openLink = useOpenLink(threadRef);
   return (event, targetUrl, targetThreadRef, targetEnvironmentId, onCommitUnavailable) => {
-    // fork: open PR links in the system browser when "Open links in" is System browser.
-    if (!shouldForkInterceptInAppLink()) return false;
     if (!openInApp || shouldOpenPullRequestExternally(event)) return false;
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
+    // fork: in the desktop app with "Open links in: System browser", open clicked PR/commit links externally.
+    const openExternallyInDesktop =
+      onCommitUnavailable === undefined && !shouldForkInterceptInAppLink();
+    const openInSystemBrowser = () => {
+      void openLink(targetUrl, {
+        event: { metaKey: event.metaKey, ctrlKey: event.ctrlKey, button: event.button },
+        threadRef: resolvedThreadRef,
+      }).catch((error: unknown) => console.error(error));
+    };
     const openPullRequest = () => {
       const target = pullRequestLinkPanelTarget({
         url: targetUrl,
@@ -114,6 +121,10 @@ export function useOpenChangeRequestLink(
         lendHostProject: resolvedPanelRef !== undefined,
       });
       if (target === null) return false;
+      if (openExternallyInDesktop) {
+        openInSystemBrowser();
+        return true;
+      }
       const { project, repository, number, host } = target;
       const revealUrl = parsePullRequestAnchor(targetUrl) === null ? undefined : targetUrl;
       const pullRequestsSearch = {
@@ -194,6 +205,10 @@ export function useOpenChangeRequestLink(
       const commit = parsedCommit.link;
       event.preventDefault();
       event.stopPropagation();
+      if (openExternallyInDesktop) {
+        openInSystemBrowser();
+        return true;
+      }
       const userActionRevision = useRightPanelStore.getState().markUserAction(resolvedThreadRef);
       const baseRef = selectThreadBranchBaseRef(useDiffPanelStore.getState(), resolvedThreadRef);
       const selection = selectThreadDiffPanelSelection(

@@ -31,8 +31,12 @@ const readForkOpenFilesIn = (): ForkOpenFilesIn =>
 export const useForkOpenFilesIn = () =>
   useLocalStorage(FORK_OPEN_FILES_IN_KEY, FORK_OPEN_FILES_IN_DEFAULT, ForkOpenFilesIn);
 
+function canForkOpenExternalLink(): boolean {
+  return typeof window !== "undefined" && typeof window.desktopBridge?.openExternal === "function";
+}
+
 export const shouldForkInterceptInAppLink = (): boolean =>
-  shouldInterceptInAppLink(readForkOpenLinksIn());
+  !canForkOpenExternalLink() || shouldInterceptInAppLink(readForkOpenLinksIn());
 
 function canForkOpenLocalFile(environmentId: EnvironmentId | null): boolean {
   if (environmentId === null || typeof window === "undefined") return false;
@@ -49,6 +53,19 @@ export async function openForkExternalBrowserUrl(url: string): Promise<boolean> 
   return true;
 }
 
+export function shouldForkOpenLocalFile(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly altKey?: boolean;
+}): boolean {
+  return (
+    resolveForkFileAction({
+      setting: readForkOpenFilesIn(),
+      canOpenLocally: canForkOpenLocalFile(input.environmentId),
+      ...(input.altKey === undefined ? {} : { altKey: input.altKey }),
+    }) === "external"
+  );
+}
+
 /**
  * Opens a local file in its OS default app when the fork setting is "external".
  * Returns true when this helper handled the click (opened or reported a local error),
@@ -61,12 +78,7 @@ export async function openForkFileOrFallback(input: {
   readonly altKey?: boolean;
   readonly fallback: () => void;
 }): Promise<boolean> {
-  const action = resolveForkFileAction({
-    setting: readForkOpenFilesIn(),
-    canOpenLocally: canForkOpenLocalFile(input.environmentId),
-    ...(input.altKey === undefined ? {} : { altKey: input.altKey }),
-  });
-  if (action !== "external" || input.environmentId === null) {
+  if (!shouldForkOpenLocalFile(input) || input.environmentId === null) {
     input.fallback();
     return false;
   }

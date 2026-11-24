@@ -10,8 +10,12 @@ vi.mock("~/components/ui/toast", () => ({
   },
 }));
 
-import { FORK_OPEN_FILES_IN_KEY } from "./externalOpen.logic";
-import { openForkFileOrFallback } from "./forkExternalOpen";
+import { FORK_OPEN_FILES_IN_KEY, FORK_OPEN_LINKS_IN_KEY } from "./externalOpen.logic";
+import {
+  openForkFileOrFallback,
+  shouldForkInterceptInAppLink,
+  shouldForkOpenLocalFile,
+} from "./forkExternalOpen";
 
 const ENV_ID = EnvironmentId.make("host-env");
 
@@ -148,5 +152,31 @@ describe("openForkFileOrFallback", () => {
     expect(opened).toBe(true);
     expect(fallback).not.toHaveBeenCalled();
     expect(toastAddMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks synchronously whether a local file should open externally", () => {
+    expect(shouldForkOpenLocalFile({ environmentId: ENV_ID })).toBe(false);
+
+    (window as unknown as { desktopBridge?: unknown }).desktopBridge = {
+      forkOpenPath: vi.fn(async () => ({ ok: true as const })),
+    };
+    expect(shouldForkOpenLocalFile({ environmentId: ENV_ID })).toBe(true);
+    expect(shouldForkOpenLocalFile({ environmentId: ENV_ID, altKey: true })).toBe(false);
+    expect(shouldForkOpenLocalFile({ environmentId: null })).toBe(false);
+
+    memoryStorage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+    expect(shouldForkOpenLocalFile({ environmentId: ENV_ID })).toBe(false);
+  });
+
+  it("only disables in-app link interception when the desktop shell can open links externally", () => {
+    expect(shouldForkInterceptInAppLink()).toBe(true);
+
+    (window as unknown as { desktopBridge?: unknown }).desktopBridge = {
+      openExternal: vi.fn(async () => true),
+    };
+    expect(shouldForkInterceptInAppLink()).toBe(false);
+
+    memoryStorage.setItem(FORK_OPEN_LINKS_IN_KEY, JSON.stringify("app"));
+    expect(shouldForkInterceptInAppLink()).toBe(true);
   });
 });

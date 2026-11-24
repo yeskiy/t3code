@@ -8,7 +8,10 @@ import { useNavigate } from "@tanstack/react-router";
 import type { MouseEvent } from "react";
 
 import { readIssueListPreferences } from "../components/issue/issueListPreferences";
-import { shouldForkInterceptInAppLink } from "../fork/externalOpen/forkExternalOpen"; // fork: external open
+import {
+  openForkExternalBrowserUrl,
+  shouldForkInterceptInAppLink,
+} from "../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { ISSUES_PANEL_REF, PULL_REQUESTS_PANEL_REF, useRightPanelStore } from "../rightPanelStore";
 import { useProjects, useServerConfigs } from "../state/entities";
 
@@ -34,8 +37,6 @@ export function useOpenIssueLink(
   const serverConfigs = useServerConfigs();
   const navigate = useNavigate();
   return (event, targetUrl, targetEnvironmentId, trackers) => {
-    // fork: open issue links in the system browser when "Open links in" is System browser.
-    if (!shouldForkInterceptInAppLink()) return false;
     if (event.metaKey || event.ctrlKey) return false;
     const resolvedPanelRef = panelRef ?? threadRef;
     // A list page's panel ref is a placeholder, not an environment; the link names its own.
@@ -50,6 +51,11 @@ export function useOpenIssueLink(
     if (target === null) return false;
     event.preventDefault();
     event.stopPropagation();
+    // fork: in the desktop app with "Open links in: System browser", open issue links externally.
+    if (!shouldForkInterceptInAppLink()) {
+      void openForkExternalBrowserUrl(targetUrl).catch((error: unknown) => console.error(error));
+      return true;
+    }
     const surface = {
       projectId: target.ref.projectId,
       tracker: target.ref.tracker,

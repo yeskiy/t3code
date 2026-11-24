@@ -215,6 +215,7 @@ import { isMailtoUrl } from "../fork/externalOpen/externalOpen.logic";
 import {
   openForkFileOrFallback,
   shouldForkInterceptInAppLink,
+  shouldForkOpenLocalFile,
   useForkOpenLinksIn,
 } from "../fork/externalOpen/forkExternalOpen";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
@@ -1010,13 +1011,34 @@ function useChatMarkdownState({
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}
         // fork: resolve host path and open local file in OS default app when configured.
         onOpenExternalFile={(altKey, fallback) => {
+          if (!shouldForkOpenLocalFile({ environmentId, altKey })) {
+            fallback();
+            return;
+          }
+          const panelRef = threadRef ? rightPanelHostRef(threadRef) : null;
+          const panelKey = panelRef ? scopedThreadKey(panelRef) : null;
+          const userActionRevision = panelRef
+            ? useRightPanelStore.getState().markUserAction(panelRef)
+            : null;
           void resolveHostPath().then(({ absolutePath }) =>
             openForkFileOrFallback({
               environmentId,
               path: absolutePath,
               cwd,
               altKey,
-              fallback,
+              fallback: () => {
+                if (
+                  threadRef &&
+                  panelRef &&
+                  panelKey !== null &&
+                  (scopedThreadKey(rightPanelHostRef(threadRef)) !== panelKey ||
+                    useRightPanelStore.getState().getUserActionRevision(panelRef) !==
+                      userActionRevision)
+                ) {
+                  return;
+                }
+                fallback();
+              },
             }),
           );
         }}
