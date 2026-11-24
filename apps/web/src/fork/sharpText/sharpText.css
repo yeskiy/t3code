@@ -16,6 +16,7 @@ html[data-fork-sharp-text] *::after {
 html[data-fork-sharp-text] [data-slot="scroll-area-viewport"],
 html[data-fork-sharp-text] .topbar-scroll-fade,
 html[data-fork-sharp-text] .virtualized-scroll-fade,
+html[data-fork-sharp-text] [data-composer-banner-surface="attached"]::before,
 html[data-fork-sharp-text] [data-thread-details-card] * {
   -webkit-mask-image: none !important;
   mask-image: none !important;
@@ -39,11 +40,35 @@ html[data-fork-sharp-text] [data-thread-details-card] [data-slot="scroll-area-vi
   background-color: var(--popover);
 }
 
-/* --- Composer: opaque host, and no will-change layers over the text --- */
-html[data-fork-sharp-text] [data-slot="composer-host"] {
+/* --- Composer: opaque surfaces inside each stacking context, border on top, no glass ::before --- */
+html[data-fork-sharp-text] [data-slot="composer-shell"]::before,
+html[data-fork-sharp-text] [data-slot="composer-host"]::before {
+  display: none;
+}
+
+html[data-fork-sharp-text]
+  [data-slot="composer-host"]:not(:has([data-composer-banner-surface="attached"])),
+html[data-fork-sharp-text]
+  [data-slot="composer-host"]:not(:has([data-composer-banner-surface="attached"]))
+  > *,
+html[data-fork-sharp-text] [data-chat-composer-main-surface="true"],
+html[data-fork-sharp-text] .composer-tiptap {
   background-color: var(--chat-composer-glass-surface);
 }
 
+html[data-fork-sharp-text]
+  [data-slot="composer-host"]:not(:has([data-composer-banner-surface="attached"]))
+  > * {
+  border-radius: inherit;
+}
+
+html[data-fork-sharp-text] [data-slot="composer-host"]::after {
+  z-index: 20;
+}
+
+html[data-fork-sharp-text] [data-slot="composer-shell"],
+html[data-fork-sharp-text] [data-slot="composer-shell"] *,
+html[data-fork-sharp-text] [data-chat-composer-form],
 html[data-fork-sharp-text] [data-chat-composer-form] *,
 html[data-fork-sharp-text] [data-thread-details-card] * {
   will-change: auto !important;
