@@ -228,6 +228,7 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
   readonly userHome: string;
   /** The instance's GEMINI_HOME, where agy loads plugins from. */
   readonly profileDirectory: string;
+  readonly extraSkillRoots?: ReadonlyArray<string>; // fork: shared synced Claude skill roots
 }): Effect.fn.Return<
   ReadonlyArray<ServerProviderSkill>,
   AntigravitySkillsProbeError,
@@ -411,6 +412,10 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       new Set(),
       0,
     );
+  }
+  // fork: scan shared synced Claude skill roots after user skills so user skills win
+  for (const directory of input.extraSkillRoots ?? []) {
+    yield* scanDirectory(directory, "user", "manifest");
   }
 
   const pluginsDirectory = path.join(input.profileDirectory, "config", "plugins");

@@ -82,6 +82,8 @@ import {
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
 import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
+// fork: resolve shared claude.ai synced skill roots for Antigravity
+import { resolveSyncedSkillsForClaudeInstance } from "../../fork/syncedSkills/ClaudeSyncedSkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -223,6 +225,21 @@ export const AntigravityDriver: ProviderDriver<
       currentCatalog.pipe(
         Effect.map((catalog) => stampIdentity(ModelCatalog.applyModelCatalog(draft, catalog))),
       );
+    // fork: recompute shared Claude synced skills root from live settings on session start and scan
+    const resolveExtraSkillRoots = (cwd?: string) =>
+      host.settings.get.pipe(
+        Effect.flatMap((serverSettings) =>
+          resolveSyncedSkillsForClaudeInstance({
+            claudeInstanceId: settings.claudeSyncedSkillsInstance,
+            settings: serverSettings,
+            hostEnvironment: processEnvironment,
+            cwd,
+          }),
+        ),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
 
     const prepareSpawn = Effect.fn("AntigravityDriver.prepareSpawn")(function* (
       cwd: string,
@@ -253,12 +270,15 @@ export const AntigravityDriver: ProviderDriver<
             }),
         ),
       );
+      // fork: recompute shared synced skills on each session start so re-syncs appear
+      const extraSkillRoots = yield* resolveExtraSkillRoots(cwd);
       const profile = yield* prepareAntigravityProfile({
         profileDirectory,
         baseEnv: processEnvironment,
         auth,
         userHome,
         tempDirectory: directories.runtimeTemp,
+        extraSkillRoots,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
@@ -722,7 +742,11 @@ export const AntigravityDriver: ProviderDriver<
       snapshotForCwd: (cwd) =>
         !enabled
           ? provider.snapshot.getSnapshot
-          : discoverAntigravitySkills({ cwd, userHome, profileDirectory }).pipe(
+          : resolveExtraSkillRoots(cwd).pipe(
+              // fork: include shared synced Claude skills in Antigravity workspace snapshots
+              Effect.flatMap((extraSkillRoots) =>
+                discoverAntigravitySkills({ cwd, userHome, profileDirectory, extraSkillRoots }),
+              ),
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.provideService(Path.Path, path),
               Effect.flatMap((skills) => provider.snapshotForCwd(cwd, skills)),

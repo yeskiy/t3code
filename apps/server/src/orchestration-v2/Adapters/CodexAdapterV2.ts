@@ -2,6 +2,8 @@ import { pipe } from "effect/Function";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { brokenRuntimeError } from "../../provider/providerCompatibility.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
+// fork: register shared claude.ai synced skill roots on session start
+import { syncCodexExtraSkillRoots } from "../../fork/syncedSkills/CodexSyncedSkills.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
@@ -2037,7 +2039,7 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
   { instanceId, environment, enabled, config }: ProviderAdapterDriverCreateInput<CodexSettings>,
   hooks: Pick<
     CodexAdapterV2Options,
-    "onUsageLimits" | "resolveRuntime" | "compatibility" | "models"
+    "onUsageLimits" | "resolveRuntime" | "compatibility" | "models" | "resolveExtraSkillRoots" // fork: claude.ai synced skills
   > = {},
 ) {
   const clientFactory = yield* CodexAppServerClientFactory;
@@ -2097,6 +2099,8 @@ export interface CodexAdapterV2Options {
   readonly compatibility?: (
     version: string,
   ) => Effect.Effect<ServerProviderCompatibilityAdvisory | undefined>;
+  // fork: recompute shared synced Claude skill roots when a Codex session starts
+  readonly resolveExtraSkillRoots?: () => Effect.Effect<ReadonlyArray<string>>;
   readonly digest: Digest.Digest["Service"];
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
@@ -2261,6 +2265,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               });
             if (refused) return yield* refused;
             yield* client.notify("initialized", undefined);
+            // fork: register shared Claude synced skill roots on session start
+            if (adapterOptions.resolveExtraSkillRoots) {
+              yield* syncCodexExtraSkillRoots(
+                client,
+                yield* adapterOptions.resolveExtraSkillRoots(),
+              );
+            }
             yield* Ref.set(initialized, true);
           }),
         );

@@ -64,6 +64,8 @@ import * as CodexManagedTokenBroker from "../CodexManagedTokenBroker.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+// fork: resolve shared claude.ai synced skill roots for Codex
+import { resolveSyncedSkillsForClaudeInstance } from "../../fork/syncedSkills/ClaudeSyncedSkills.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -181,6 +183,7 @@ export const CodexDriver: ProviderDriver<
     const resetCreditCoordinator = yield* ResetCreditCoordinator.ResetCreditCoordinator;
     const fileSystem = yield* FileSystem.FileSystem;
     const pathService = yield* Path.Path;
+    const host = yield* ProviderHost.ProviderHost; // fork: resolve shared synced Claude skills
     const httpClient = yield* HttpClient.HttpClient;
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const installation = yield* CodexInstallation.CodexInstallation;
@@ -239,6 +242,21 @@ export const CodexDriver: ProviderDriver<
       resolveInstallation(options).pipe(
         Effect.map((capabilities) => withCodexNativeLatestVersion(capabilities, httpClient)),
       );
+    // fork: recompute shared Claude synced skills root on session start and workspace scan
+    const resolveExtraSkillRoots = (cwd?: string) =>
+      host.settings.get.pipe(
+        Effect.flatMap((serverSettings) =>
+          resolveSyncedSkillsForClaudeInstance({
+            claudeInstanceId: effectiveConfig.claudeSyncedSkillsInstance,
+            settings: serverSettings,
+            hostEnvironment: processEnv,
+            cwd,
+          }),
+        ),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, pathService),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
 
     const orchestrationAdapter = yield* createCodexAdapterV2(
       {
@@ -255,6 +273,7 @@ export const CodexDriver: ProviderDriver<
           Effect.map((value) => value.models),
         ),
         compatibility: installation.compatibility,
+        resolveExtraSkillRoots: () => resolveExtraSkillRoots(), // fork: claude.ai synced skills
       },
     ).pipe(
       Effect.mapError(
@@ -331,13 +350,20 @@ export const CodexDriver: ProviderDriver<
         ? snapshot.getSnapshot
         : Effect.all([
             snapshot.getSnapshot,
-            probeSkills({
-              binaryPath: effectiveConfig.binaryPath,
-              homePath: effectiveConfig.homePath,
-              launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
-              cwd,
-              environment: processEnv,
-            }).pipe(Effect.timeout(resolveProviderProbeTimeoutMs("codex", 20_000, processEnv))),
+            resolveExtraSkillRoots(cwd).pipe(
+              // fork: pass shared synced Claude skill roots when probing Codex skills
+              Effect.flatMap((extraSkillRoots) =>
+                probeSkills({
+                  binaryPath: effectiveConfig.binaryPath,
+                  homePath: effectiveConfig.homePath,
+                  launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+                  cwd,
+                  environment: processEnv,
+                  extraSkillRoots,
+                }),
+              ),
+              Effect.timeout(resolveProviderProbeTimeoutMs("codex", 20_000, processEnv)),
+            ),
           ]).pipe(
             Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
             Effect.mapError(

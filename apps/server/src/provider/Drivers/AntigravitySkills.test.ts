@@ -482,4 +482,45 @@ it.layer(NodeServices.layer)("discoverAntigravitySkills", (it) => {
         ]);
       }),
   );
+
+  // fork: shared synced Claude skill roots scan after user skills so user skills win
+  it.effect("reads skills from extraSkillRoots while letting user skills win on collision", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const input = yield* makeWorkspace();
+      const userSkillPath = yield* writeSkill(
+        path.join(input.userHome, ".gemini", "config", "skills", "docx"),
+        "---\nname: docx\ndescription: User docx.\n---\n",
+      );
+      const syncedBucket = path.join(input.userHome, ".claude", "skills", "synced", "bucket-a");
+      yield* writeSkill(
+        path.join(syncedBucket, "docx"),
+        "---\nname: docx\ndescription: Synced docx.\n---\n",
+      );
+      const syncedPdfPath = yield* writeSkill(
+        path.join(syncedBucket, "pdf"),
+        "---\nname: pdf\ndescription: Synced pdf.\n---\n",
+      );
+
+      assert.deepEqual(
+        yield* discoverAntigravitySkills({ ...input, extraSkillRoots: [syncedBucket] }),
+        [
+          {
+            name: "docx",
+            description: "User docx.",
+            path: userSkillPath,
+            scope: "user",
+            enabled: true,
+          },
+          {
+            name: "pdf",
+            description: "Synced pdf.",
+            path: syncedPdfPath,
+            scope: "user",
+            enabled: true,
+          },
+        ],
+      );
+    }),
+  );
 });

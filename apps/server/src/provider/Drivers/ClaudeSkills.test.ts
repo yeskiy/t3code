@@ -1362,4 +1362,151 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
       );
     }),
   );
+
+  // fork: claude.ai synced skills discovery, precedence, overrides, and syncClaudeAiSkills switch
+  it.effect("discovers claude.ai synced skills for the current account bucket", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-synced-skills-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const workspace = path.join(tempDir, "workspace");
+      const synced = path.join(configDir, "skills", "synced");
+      const organization = "11111111-2222-4333-8444-555555555555";
+      const accountA = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+      const accountB = "77777777-8888-4999-aaaa-bbbbbbbbbbbb";
+      const bucketA = path.join(synced, `${organization}_${accountA}`);
+      const bucketB = path.join(synced, `${organization}_${accountB}`);
+
+      yield* writeSkill(bucketA, "docx", "---\nname: docx\ndescription: Synced Word docs.\n---\n");
+      yield* writeSkill(
+        bucketA,
+        "brand-identity",
+        "---\nname: brand-identity\ndescription: Synced brand guide.\n---\n",
+      );
+      yield* writeSkill(
+        bucketA,
+        "deep-research",
+        "---\nname: deep-research\ndescription: Synced research.\n---\n",
+      );
+      yield* writeSkill(bucketB, "other-account", "---\nname: other-account\n---\n");
+      yield* fs.writeFileString(
+        path.join(bucketA, "manifest.json"),
+        JSON.stringify({
+          lastUpdated: 1795540246671,
+          skills: [
+            { skillId: "docx", name: "docx", source: "anthropic" },
+            { skillId: "deep-research", name: "deep-research", source: "anthropic-example" },
+            { skillId: "skill_01Qh", name: "brand-identity", source: "plugin" },
+          ],
+        }),
+      );
+      yield* fs.writeFileString(path.join(bucketA, ".last-complete-round"), "round-1 none");
+      yield* fs.writeFileString(path.join(synced, `.bucket-${organization}_${accountA}`), "");
+      yield* fs.writeFileString(path.join(synced, `.bucket-${organization}_${accountB}`), "");
+      yield* fs.writeFileString(
+        path.join(configDir, ".claude.json"),
+        JSON.stringify({
+          oauthAccount: { organizationUuid: organization, accountUuid: accountA },
+        }),
+      );
+
+      // User skill with the same bare name wins over the synced skill.
+      yield* writeSkill(
+        path.join(configDir, "skills"),
+        "deep-research",
+        "---\nname: deep-research\ndescription: User research.\n---\n",
+      );
+
+      const skills = yield* discoverClaudeSkills({ homePath: configDir }, workspace, {});
+      assert.deepEqual(
+        skills.map(({ name, path: skillPath, description, scope, enabled }) => ({
+          name,
+          path: skillPath,
+          description,
+          scope,
+          enabled,
+        })),
+        [
+          {
+            name: "anthropic-skills:brand-identity",
+            path: path.join(bucketA, "brand-identity", "SKILL.md"),
+            description: "Synced brand guide.",
+            scope: "user",
+            enabled: true,
+          },
+          {
+            name: "anthropic-skills:docx",
+            path: path.join(bucketA, "docx", "SKILL.md"),
+            description: "Synced Word docs.",
+            scope: "user",
+            enabled: true,
+          },
+          {
+            name: "deep-research",
+            path: path.join(configDir, "skills", "deep-research", "SKILL.md"),
+            description: "User research.",
+            scope: "user",
+            enabled: true,
+          },
+        ],
+      );
+
+      assert.deepEqual(
+        planClaudeSkillDispatch(
+          "$anthropic-skills:docx format this report",
+          new Map(skills.map((skill) => [skill.name, skill])),
+        ),
+        {
+          leadingText: undefined,
+          commandText: "/anthropic-skills:docx format this report",
+        },
+      );
+
+      // Shared project settings cannot turn off syncClaudeAiSkills, while local and user settings do.
+      yield* fs.makeDirectory(path.join(workspace, ".claude"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspace, ".claude", "settings.json"),
+        '{"syncClaudeAiSkills":false}',
+      );
+      assert.include(
+        (yield* discoverClaudeSkills({ homePath: configDir }, workspace, {})).map((s) => s.name),
+        "anthropic-skills:docx",
+      );
+
+      yield* fs.writeFileString(
+        path.join(workspace, ".claude", "settings.local.json"),
+        '{"syncClaudeAiSkills":false}',
+      );
+      assert.deepEqual(
+        (yield* discoverClaudeSkills({ homePath: configDir }, workspace, {})).map((s) => s.name),
+        ["deep-research"],
+      );
+
+      yield* fs.remove(path.join(workspace, ".claude", "settings.local.json"));
+      yield* fs.writeFileString(
+        path.join(configDir, "settings.json"),
+        '{"skillOverrides":{"anthropic-skills:docx":"off","brand-identity":"user-invocable-only"}}',
+      );
+      const overridden = yield* discoverClaudeSkills({ homePath: configDir }, workspace, {});
+      assert.deepEqual(
+        overridden
+          .filter((skill) => skill.name.startsWith("anthropic-skills:"))
+          .map((skill) => [skill.name, skill.enabled, skill.userInvocationOnly === true]),
+        [
+          ["anthropic-skills:brand-identity", true, true],
+          ["anthropic-skills:docx", false, false],
+        ],
+      );
+
+      yield* fs.writeFileString(
+        path.join(configDir, "settings.json"),
+        '{"syncClaudeAiSkills":false}',
+      );
+      assert.deepEqual(
+        (yield* discoverClaudeSkills({ homePath: configDir }, workspace, {})).map((s) => s.name),
+        ["deep-research"],
+      );
+    }),
+  );
 });

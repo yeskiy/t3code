@@ -58,6 +58,8 @@ import {
   type CodexResetCreditsSummary,
 } from "./codexUsageLimits.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+// fork: register shared claude.ai synced skill roots with Codex app-server
+import { syncCodexExtraSkillRoots } from "../fork/syncedSkills/CodexSyncedSkills.ts";
 import packageJson from "../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -903,8 +905,9 @@ export const makeCodexSkillsProbe = Effect.fn("makeCodexSkillsProbe")(function* 
     readonly launchArgs?: string;
     readonly cwd: string;
     readonly environment?: NodeJS.ProcessEnv;
+    readonly extraSkillRoots?: ReadonlyArray<string>; // fork: shared synced Claude skill roots
   }) {
-    const { cwd, ...rest } = input;
+    const { cwd, extraSkillRoots, ...rest } = input;
     const launch = {
       ...rest,
       environment: providerProbeEnvironment(rest.environment ?? process.env),
@@ -915,6 +918,8 @@ export const makeCodexSkillsProbe = Effect.fn("makeCodexSkillsProbe")(function* 
     );
     yield* Effect.forEach(stale, (key) => RcMap.invalidate(helpers, key), { discard: true });
     const skillsResponse = yield* RcMap.get(helpers, launch).pipe(
+      // fork: register shared synced Claude skill roots before listing skills
+      Effect.tap((client) => syncCodexExtraSkillRoots(client, extraSkillRoots ?? [])),
       Effect.flatMap((client) => client.request("skills/list", { cwds: [cwd], forceReload: true })),
       Effect.scoped,
       // RcMap keeps a failed spawn, and a dead helper keeps failing; drop it so the retry respawns.
