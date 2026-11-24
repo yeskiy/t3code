@@ -19,6 +19,7 @@ import {
   replacedVersionedAppImagePath,
 } from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import { applyForkLcdTextSwitches } from "./ForkLcdText.ts"; // fork: LCD text
 
 export interface DesktopPreReadyCommandLineReader {
   readonly hasSwitch: (switchName: string) => boolean;
@@ -69,6 +70,7 @@ export const make = Effect.gen(function* () {
   const homeDirectory = yield* HostProcess.HomeDirectory;
   const linuxDesktopEntryConfig = yield* LinuxDesktopEntryConfig;
   return yield* Effect.sync((): DesktopPreReadyElectronOptions["Service"] => {
+    applyForkLcdTextSwitches({ platform, env: process.env, commandLine: Electron.app.commandLine }); // fork: LCD text
     const linuxPasswordStoreCommandLine =
       platform === "linux"
         ? readCommandLineSwitchValue(Electron.app.commandLine, "password-store")
