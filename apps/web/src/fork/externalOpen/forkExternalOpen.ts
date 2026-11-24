@@ -31,8 +31,12 @@ const readForkOpenFilesIn = (): ForkOpenFilesIn =>
 export const useForkOpenFilesIn = () =>
   useLocalStorage(FORK_OPEN_FILES_IN_KEY, FORK_OPEN_FILES_IN_DEFAULT, ForkOpenFilesIn);
 
+function canForkOpenExternalLink(): boolean {
+  return typeof window !== "undefined" && typeof window.desktopBridge?.openExternal === "function";
+}
+
 export const shouldForkInterceptInAppLink = (): boolean =>
-  shouldInterceptInAppLink(readForkOpenLinksIn());
+  !canForkOpenExternalLink() || shouldInterceptInAppLink(readForkOpenLinksIn());
 
 function canForkOpenLocalFile(environmentId: EnvironmentId | null): boolean {
   if (environmentId === null || typeof window === "undefined") return false;
