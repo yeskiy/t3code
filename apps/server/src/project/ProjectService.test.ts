@@ -13,6 +13,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -634,6 +635,37 @@ it.layer(layerTest)("ProjectService", (it) => {
     }),
   );
 
+  it.effect("saves a project's default model in its Settings overrides", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const projectId = ProjectId.make("project:default-model");
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-sonnet-5-5",
+        options: [{ id: "effort", value: "medium" }],
+      };
+      yield* settings.updateSettings({
+        projectSettingsOverrides: { [projectId]: { defaultThreadEnvMode: "worktree" } },
+      });
+      yield* service.create({
+        commandId: CommandId.make("command:default-model:create"),
+        projectId,
+        title: "Default model",
+        workspaceRoot: "/work/default-model",
+      });
+      yield* service.update({
+        commandId: CommandId.make("command:default-model:update"),
+        projectId,
+        defaultModelSelection: modelSelection,
+      });
+      assert.deepEqual((yield* settings.getSettings).projectSettingsOverrides[projectId], {
+        defaultThreadEnvMode: "worktree",
+        defaultModelSelection: modelSelection,
+      });
+    }),
+  );
+
   it.effect("rejects a workspace another active project holds", () =>
     Effect.gen(function* () {
       const service = yield* ProjectService.ProjectService;
@@ -1201,4 +1233,101 @@ it.effect("rejects an update that waited on the lock while its project was delet
       "Update race",
     );
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
+);
+
+it.effect("resolves updated project defaults and null resets when settings are folded", () =>
+  Effect.gen(function* () {
+    const service = yield* ProjectService.ProjectService;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const projectId = ProjectId.make("project:folded-defaults");
+    const modelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-5-5",
+      options: [{ id: "effort", value: "medium" }],
+    };
+    const otherModelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-opus-5-5",
+    };
+
+    yield* service.create({
+      commandId: CommandId.make("command:folded-defaults:create"),
+      projectId,
+      title: "Folded defaults",
+      workspaceRoot: "/work/folded-defaults",
+    });
+
+    const updated = yield* service.update({
+      commandId: CommandId.make("command:folded-defaults:set"),
+      projectId,
+      defaultModelSelection: modelSelection,
+      defaultThreadEnvMode: "worktree",
+      autoPull: true,
+    });
+    const afterSet = yield* settings.getSettings;
+    assert.deepEqual(afterSet.projectSettingsOverrides[projectId], {
+      defaultModelSelection: modelSelection,
+      defaultThreadEnvMode: "worktree",
+      defaultAutoPull: true,
+    });
+    const resolvedAfterSet = resolveProjectSettings(afterSet, projectId, updated);
+    assert.deepEqual(resolvedAfterSet.settings.defaultModelSelection, modelSelection);
+    assert.equal(resolvedAfterSet.sources.defaultModelSelection, "project");
+    assert.equal(resolvedAfterSet.settings.defaultThreadEnvMode, "worktree");
+    assert.equal(resolvedAfterSet.sources.defaultThreadEnvMode, "project");
+    assert.isTrue(resolvedAfterSet.settings.defaultAutoPull);
+    assert.equal(resolvedAfterSet.sources.defaultAutoPull, "project");
+
+    // A retried update must not overwrite a later Settings edit.
+    yield* settings.updateSettings({
+      projectSettingsOverrides: {
+        [projectId]: {
+          defaultModelSelection: otherModelSelection,
+          defaultThreadEnvMode: "worktree",
+          defaultAutoPull: true,
+        },
+      },
+    });
+    yield* service.update({
+      commandId: CommandId.make("command:folded-defaults:set"),
+      projectId,
+      defaultModelSelection: modelSelection,
+      defaultThreadEnvMode: "worktree",
+      autoPull: true,
+    });
+    assert.deepEqual(
+      (yield* settings.getSettings).projectSettingsOverrides[projectId]?.defaultModelSelection,
+      otherModelSelection,
+    );
+
+    const cleared = yield* service.update({
+      commandId: CommandId.make("command:folded-defaults:clear"),
+      projectId,
+      defaultModelSelection: null,
+      defaultThreadEnvMode: null,
+      autoPull: false,
+    });
+    const afterClear = yield* settings.getSettings;
+    assert.deepEqual(afterClear.projectSettingsOverrides[projectId], {
+      defaultAutoPull: false,
+    });
+    const resolvedAfterClear = resolveProjectSettings(afterClear, projectId, cleared);
+    assert.equal(resolvedAfterClear.sources.defaultModelSelection, "environment");
+    assert.equal(resolvedAfterClear.sources.defaultThreadEnvMode, "environment");
+    assert.isFalse(resolvedAfterClear.settings.defaultAutoPull);
+    assert.equal(resolvedAfterClear.sources.defaultAutoPull, "project");
+  }).pipe(
+    Effect.provide(
+      RuntimeLayer.layerProjectService.pipe(
+        Layer.provideMerge(ProjectEnrichmentService.layer),
+        Layer.provideMerge(layerWorkspacePaths),
+        Layer.provideMerge(layerMetadata),
+        Layer.provideMerge(SqlitePersistence.layerMemory),
+        Layer.provideMerge(ServerSettings.layerTest({ projectSettingsFolded: true })),
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-folded-" })),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        Layer.provideMerge(layerEnrichmentCompletions),
+      ),
+    ),
+  ),
 );
