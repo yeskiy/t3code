@@ -98,6 +98,7 @@ import * as MessageHandlers from "./toolkits/message/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 import { MCP_HTTP_PATH } from "../httpCors.ts";
 import { requestUrl } from "../requestUrl.ts";
+import { makeForkMcpScopeVisibilityCheck } from "../fork/mcpScope/McpScopeGuard.ts"; // fork: per-provider MCP tool scope
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   requestUrl(request).pipe(
@@ -1401,6 +1402,9 @@ export const layerInProcessMcpServer = McpServer.middleware<{
   { global: true },
 ).pipe(Layer.provideMerge(McpServer.McpServer.layer));
 
+// fork: enforce per-provider MCP tool scopes on tools/list and tools/call
+const layerForkMcpScope = McpServer.visibility(makeForkMcpScopeVisibilityCheck, { global: true });
+
 export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE, RR>) =>
   McpServer.layerHttp({
     name: "T3 Code",
@@ -1408,7 +1412,8 @@ export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE,
     path: MCP_HTTP_PATH,
     protocols: mcpProtocols,
     allowSessionTermination: true,
-    registrations,
+    // fork: enforce per-provider MCP tool scopes on tools/list and tools/call
+    registrations: Layer.mergeAll(registrations, layerForkMcpScope),
   }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
 /** Every tool the T3 MCP server advertises. AgentContextBudget.test.ts measures this set. */

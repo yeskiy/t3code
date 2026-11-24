@@ -57,6 +57,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import { applyForkMcpSessionCapabilities } from "../fork/mcpScope/McpScopeGuard.ts"; // fork: per-provider MCP tool scope
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import {
@@ -595,8 +596,37 @@ export const layerWithOptions = (
               threadId,
               Effect.gen(function* () {
                 // Live providers build MCP clients once; reuse credentials across workspace handoffs.
-                const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
+                const { browser: rawBrowserToolsAvailable, device: rawDeviceToolsAvailable } =
                   yield* agentAccessSettings(threadId);
+                // fork: apply per-provider MCP scope; Off skips injecting the T3 MCP server.
+                const forkMcpAccess = Option.isNone(serverSettings)
+                  ? {
+                      enabled: true,
+                      browser: rawBrowserToolsAvailable,
+                      device: rawDeviceToolsAvailable,
+                    }
+                  : yield* serverSettings.value.getSettings.pipe(
+                      Effect.map((settings) =>
+                        applyForkMcpSessionCapabilities({
+                          forkMcpScopes: settings.forkMcpScopes,
+                          providerInstanceId,
+                          browserToolsAvailable: rawBrowserToolsAvailable,
+                          deviceToolsAvailable: rawDeviceToolsAvailable,
+                        }),
+                      ),
+                      Effect.orElseSucceed(() => ({
+                        enabled: false,
+                        browser: false,
+                        device: false,
+                      })),
+                    );
+                if (!forkMcpAccess.enabled) {
+                  yield* mcpSessionRegistry.revokeThread(threadId);
+                  yield* mcpSessions.clear(threadId);
+                  return { mcpCredentialId: undefined, issued: false };
+                }
+                const browserToolsAvailable = forkMcpAccess.browser;
+                const deviceToolsAvailable = forkMcpAccess.device;
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests", "issues"]);

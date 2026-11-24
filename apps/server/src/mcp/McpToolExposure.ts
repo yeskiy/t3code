@@ -27,6 +27,7 @@ export class McpToolExposure extends Context.Service<
     readonly search: (
       providerSessionId: string,
       query: string,
+      allow?: (toolName: string) => boolean, // fork: per-provider MCP tool scope filter
     ) => Effect.Effect<ReadonlyArray<ListedTool>>;
     readonly isListed: (providerSessionId: string, tool: string) => boolean;
   }
@@ -60,13 +61,13 @@ export const make = (
     }
   };
   return McpToolExposure.of({
-    search: Effect.fn("McpToolExposure.search")(function* (providerSessionId, query) {
+    search: Effect.fn("McpToolExposure.search")(function* (providerSessionId, query, allow) {
       const terms = query
         .toLowerCase()
         .split(/[^a-z0-9_]+/u)
         .filter(Boolean);
       const found = tools()
-        .filter((tool) => tool.name !== TOOL_SEARCH)
+        .filter((tool) => tool.name !== TOOL_SEARCH && (allow === undefined || allow(tool.name)))
         .map((tool) => ({ tool, score: score(tool, terms) }))
         .filter((match) => match.score > 0)
         .sort((a, b) => b.score - a.score)
