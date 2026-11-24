@@ -53,6 +53,7 @@ import {
   ProviderInstanceId,
   ProviderDriverKind,
 } from "./providerInstance.ts";
+import { ForkMcpScopes, ForkMcpScopesPatch } from "./forkMcpScope.ts"; // fork: per-provider MCP tool scope
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 import {
   CloudSpeechModelId,
@@ -1615,6 +1616,8 @@ export const ServerSettings = Schema.Struct({
 
   /** Sent by the Usage tab with each summary request to this environment; edit in settings.json. Invalid values are ignored. */
   usageModelFilter: ForwardCompatibleOptional(UsageModelFilter),
+  // fork: per-provider MCP tool scope
+  forkMcpScopes: ForkMcpScopes.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -2003,6 +2006,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  // fork: per-provider MCP tool scope
+  forkMcpScopes: Schema.optionalKey(ForkMcpScopesPatch),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

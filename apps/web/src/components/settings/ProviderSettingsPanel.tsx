@@ -104,6 +104,7 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { useSecretSources } from "./SecretSourceInput";
 import { TextGeneratorsSettings } from "./TextGeneratorsSettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
+import { ForkMcpScopeSection } from "~/fork/mcpScope/ForkMcpScopeSection"; // fork: per-provider MCP tool scope
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
@@ -1144,6 +1145,18 @@ export function EnvironmentProviderSettings({
           </div>
         </SettingsGroup>
       </SettingsSection>
+
+      {/* fork: per-provider MCP tool scope */}
+      <ForkMcpScopeSection
+        providers={rows.map((row) => ({
+          instanceId: row.instanceId,
+          label: providerInstanceName(row.explicitInstance ?? { driver: row.driver }),
+        }))}
+        defaultInstanceId={selectedRow?.instanceId}
+        scopes={settings.forkMcpScopes}
+        disabled={readOnly || !canWriteSettings}
+        onUpdateScopes={(forkMcpScopes) => updateSettings({ forkMcpScopes })}
+      />
 
       <UsageProviderSettings
         key={environmentId}

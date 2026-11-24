@@ -407,6 +407,7 @@ export function applyServerSettingsPatch(
     sourceControlHosts: sourceControlHostsPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
     usageModelAliases: usageModelAliasesPatch,
+    forkMcpScopes: forkMcpScopesPatch, // fork: per-provider MCP tool scope
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -641,6 +642,10 @@ export function applyServerSettingsPatch(
             usageModelAliasesPatch,
           ),
         }
+      : {}),
+    // fork: per-provider MCP tool scope
+    ...(forkMcpScopesPatch !== undefined
+      ? { forkMcpScopes: mergeSettingsEntries(current.forkMcpScopes, forkMcpScopesPatch) }
       : {}),
     ...(patch.sourceControlWriterModelSelection !== undefined
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
