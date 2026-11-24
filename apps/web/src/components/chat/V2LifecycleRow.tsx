@@ -550,8 +550,18 @@ function SubagentTimelineLink(props: {
   );
   const className =
     "group/subagent flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+  // fork: Keep live status and backgrounded state on the subagent turn item.
+  const liveBackgrounded =
+    agent?.backgrounded ??
+    (props.turnItem?.type === "subagent" ? props.turnItem.backgrounded : undefined);
   const liveTurnItem =
-    props.turnItem !== undefined ? { ...props.turnItem, status: liveStatus } : undefined;
+    props.turnItem?.type === "subagent"
+      ? {
+          ...props.turnItem,
+          status: liveStatus,
+          ...(liveBackgrounded === undefined ? {} : { backgrounded: liveBackgrounded }),
+        }
+      : undefined;
   return (
     <div className="flex w-full min-w-0 items-center gap-1">
       <Tooltip>

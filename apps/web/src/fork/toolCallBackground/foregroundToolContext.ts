@@ -6,13 +6,20 @@ export interface ForkMoveTarget {
   readonly itemId: TurnItemId;
 }
 
-// The focused thread's newest movable tool call. useForkForegroundToolTracker writes it.
-const store: { target: ForkMoveTarget | null } = { target: null };
+// The focused thread's newest movable and stoppable tool calls.
+const store: { moveTarget: ForkMoveTarget | null; stopTarget: ForkMoveTarget | null } = {
+  moveTarget: null,
+  stopTarget: null,
+};
 
 export const setForkMoveTarget = (next: ForkMoveTarget | null) => {
-  store.target = next;
+  store.moveTarget = next;
 };
-export const readForkMoveTarget = () => store.target;
+export const setForkStopTarget = (next: ForkMoveTarget | null) => {
+  store.stopTarget = next;
+};
+export const readForkMoveTarget = () => store.moveTarget;
+export const readForkStopTarget = () => store.stopTarget ?? store.moveTarget;
 
 // Read by resolveContext, so every shortcut resolution sees the identifier.
-export const readForkShortcutContext = () => ({ foregroundToolRunning: store.target !== null });
+export const readForkShortcutContext = () => ({ foregroundToolRunning: store.moveTarget !== null });

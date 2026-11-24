@@ -1065,6 +1065,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
     "interrupted",
   ]),
   progress: Schema.optional(Schema.String),
+  // fork: True when a running subagent is already detached from the parent turn.
+  backgrounded: Schema.optional(Schema.Boolean),
   workflow: Schema.optional(OrchestrationV2SubagentWorkflow),
   result: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -2119,6 +2121,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
+    // fork: True when a running subagent is already detached from the parent turn.
+    backgrounded: Schema.optional(Schema.Boolean),
     result: Schema.NullOr(Schema.String),
     /** Same as the prompt and result of subagent `subagentId`. */
     promptOmitted: DedupedBodyMarker,
@@ -3016,6 +3020,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
+    // fork: True when a running subagent is already detached from the parent turn.
+    backgrounded: Schema.optional(Schema.Boolean),
     result: Schema.NullOr(Schema.String),
   }),
   Schema.Struct({

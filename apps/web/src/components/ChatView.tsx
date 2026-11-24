@@ -2965,6 +2965,7 @@ export default function ChatView(props: ChatViewProps) {
     threadId,
     entries: timelineEntries,
     runLive: isWorking,
+    turnWaitingOnly: activeRuntime?.status === "waiting",
     focused: activeThreadId !== null && !embedded && !backgroundThread && canOperateThread,
   });
   const forkMoveToBackground = useForkMoveToBackgroundShortcut(); // fork: Move to background
