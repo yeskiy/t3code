@@ -111,6 +111,7 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $found = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre -property installationPath
           if (-not $found) { throw "The runner image has no MSVC Spectre-mitigated libraries. See docs/operations/development.md Windows installer prerequisites." }
+          Write-Host "Found MSVC Spectre-mitigated libraries at: $found"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -155,6 +156,8 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       # --wsl-runtime is omitted: fork builds do not bundle the Linux WSL backend.
+      # --keep-stage preserves the NSIS stage's win-unpacked directory, which holds resources/app-update.yml
+      # (electron-builder omits app-update.yml for --target dir).
       - name: Build NSIS installer
         shell: bash
         env:
@@ -165,29 +168,63 @@ jobs:
           vp run dist:desktop:artifact --platform win --target nsis --arch x64
           --build-version "${{ steps.version.outputs.version }}"
           --output-dir "$RUNNER_TEMP/release"
+          --keep-stage
 
-      # --wsl-runtime is omitted: fork builds do not bundle the Linux WSL backend.
-      - name: Build unpacked app
+      - name: Collect unpacked app from NSIS stage
         shell: bash
-        env:
-          T3CODE_DESKTOP_UPDATE_REPOSITORY: yeskiy/t3code
-          T3CODE_DESKTOP_UNTRUSTED_BUNDLE: "true"
-        run: >
-          vp run dist:desktop:artifact --platform win --target dir --arch x64
-          --build-version "${{ steps.version.outputs.version }}"
-          --output-dir "$RUNNER_TEMP/release-dir" --skip-build
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from "node:fs";
+          import os from "node:os";
+          import path from "node:path";
+
+          const tmpRoot = os.tmpdir();
+          const stages = fs
+            .readdirSync(tmpRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && entry.name.startsWith("t3code-desktop-win-stage-"))
+            .map((entry) => path.join(tmpRoot, entry.name));
+          if (stages.length !== 1) {
+            throw new Error(`Expected 1 NSIS stage directory in ${tmpRoot}, found ${stages.length}`);
+          }
+
+          const stageRoot = stages[0];
+          const unpackedSrc = path.join(stageRoot, "app", "dist", "win-unpacked");
+          if (!fs.existsSync(unpackedSrc)) {
+            throw new Error(`Missing unpacked app directory: ${unpackedSrc}`);
+          }
+
+          const runnerTemp = process.env.RUNNER_TEMP;
+          if (!runnerTemp) {
+            throw new Error("RUNNER_TEMP is not set");
+          }
+
+          const unpackedDest = path.join(runnerTemp, "release-dir", "win-unpacked");
+          fs.rmSync(unpackedDest, { recursive: true, force: true });
+          fs.mkdirSync(path.dirname(unpackedDest), { recursive: true });
+          fs.cpSync(unpackedSrc, unpackedDest, {
+            recursive: true,
+            force: true,
+            verbatimSymlinks: true,
+          });
+          fs.rmSync(stageRoot, { recursive: true, force: true });
+          console.log(`Collected unpacked app from ${unpackedSrc} to ${unpackedDest}`);
+          EOF
 
       - name: Verify baked update feed config
         shell: bash
         run: |
           set -euo pipefail
           yml="$RUNNER_TEMP/release-dir/win-unpacked/resources/app-update.yml"
-          test -f "$yml"
-          cat "$yml"
-          grep -Eq '^owner:\s*yeskiy\s*$' "$yml"
-          grep -Eq '^repo:\s*t3code\s*$' "$yml"
-          grep -Eq '^releaseType:\s*release\s*$' "$yml"
-          if grep -Eq 'pingdotgg|^channel:\s*nightly\s*$' "$yml"; then
+          if [[ ! -f "$yml" ]]; then
+            echo "::error::Missing $yml"
+            exit 1
+          fi
+          content="$(tr -d '\r' < "$yml")"
+          printf '%s\n' "$content"
+          grep -Eq '^owner:[[:space:]]*yeskiy[[:space:]]*$' <<< "$content"
+          grep -Eq '^repo:[[:space:]]*t3code[[:space:]]*$' <<< "$content"
+          grep -Eq '^releaseType:[[:space:]]*release[[:space:]]*$' <<< "$content"
+          if grep -Eq 'pingdotgg|^channel:[[:space:]]*nightly[[:space:]]*$' <<< "$content"; then
             echo "::error::app-update.yml points at upstream or nightly"
             exit 1
           fi

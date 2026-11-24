@@ -24,7 +24,7 @@ Traced end to end from packaging to runtime update checks:
    - `resolveDesktopUpdateChannel("0.1.13-fork.<N>")` returns `"latest"` because `-fork.<N>` does not match `/-nightly\.\d{8}\.\d+$/`.
    - `isDesktopPreviewVersion("0.1.13-fork.<N>")` returns `false`.
    - `resolveGitHubPublishConfig("latest")` reads `T3CODE_DESKTOP_UPDATE_REPOSITORY` (`yeskiy/t3code`) first, then `GITHUB_REPOSITORY`, and returns `{ provider: "github", owner: "yeskiy", repo: "t3code", releaseType: "release" }` with no `channel` field.
-   - `electron-builder` bakes that object into `resources/app-update.yml` and generates `latest.yml`.
+   - `electron-builder` bakes that object into `resources/app-update.yml` and generates `latest.yml` for the `nsis` target (it skips `app-update.yml` for `--target dir`, so `.github/workflows/fork-build.yml` passes `--keep-stage` on the NSIS build and collects `win-unpacked` from that stage).
 2. **Runtime feed loading (`apps/desktop/src/app/DesktopEnvironment.ts:215-217`, `apps/desktop/src/updates/DesktopUpdates.ts:453-479`, `:569-585`, `:1290-1333`):**
    - Packaged builds read `resources/app-update.yml`.
    - Unmanaged, non-mock builds never call `electronUpdater.setFeedURL(...)`, so `electron-updater` loads `resources/app-update.yml` directly (`AppUpdater.js:383`, `:482-487`).
