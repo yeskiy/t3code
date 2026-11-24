@@ -23,6 +23,8 @@ import {
   antigravityUserSkillDirectories,
   resolveAntigravityUserHome,
 } from "./Drivers/AntigravitySkills.ts";
+// fork: claude.ai synced skills overlay for Antigravity profile config/skills.json
+import { prepareAntigravitySyncedSkillsConfig } from "../fork/syncedSkills/AntigravitySyncedSkills.ts";
 
 export const ANTIGRAVITY_AUTH_STDOUT_PREFIX =
   "Open the following link to authenticate the ACP server: ";
@@ -264,6 +266,7 @@ const linkAntigravityUserConfig = Effect.fn("linkAntigravityUserConfig")(functio
   readonly profileDirectory: string;
   readonly userHome: string;
   readonly platform: NodeJS.Platform;
+  readonly skipSkillsJson?: boolean; // fork: managed by synced skills overlay
 }): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -271,13 +274,17 @@ const linkAntigravityUserConfig = Effect.fn("linkAntigravityUserConfig")(functio
   const links = antigravityUserSkillDirectories(path, input.profileDirectory);
   const targets = antigravityUserSkillDirectories(path, userGemini);
   const directoryType = input.platform === "win32" ? "junction" : "dir";
+  // fork: omit config/skills.json when the synced skills overlay manages it
+  const configFiles = input.skipSkillsJson
+    ? antigravityUserConfigFiles.filter((segments) => segments.join("/") !== "config/skills.json")
+    : antigravityUserConfigFiles;
   for (const [link, target, type] of [
     [links[0], targets[0], directoryType],
     [links[1], targets[1], directoryType],
     // File symlinks need elevation or Developer Mode on Windows, so config files are copied there.
     ...(input.platform === "win32"
       ? []
-      : antigravityUserConfigFiles.map(
+      : configFiles.map(
           (segments) =>
             [
               path.join(input.profileDirectory, ...segments),
@@ -341,6 +348,7 @@ const copyAntigravityUserConfigFiles = Effect.fn("copyAntigravityUserConfigFiles
   function* (input: {
     readonly profileDirectory: string;
     readonly userHome: string;
+    readonly skipSkillsJson?: boolean; // fork: managed by synced skills overlay
   }): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -353,6 +361,11 @@ const copyAntigravityUserConfigFiles = Effect.fn("copyAntigravityUserConfigFiles
     };
     for (const segments of antigravityUserConfigFiles) {
       const key = segments.join("/");
+      // fork: leave config/skills.json alone when the synced skills overlay owns it
+      if (input.skipSkillsJson && key === "config/skills.json") {
+        delete copies[key];
+        continue;
+      }
       const link = path.join(input.profileDirectory, ...segments);
       const target = path.join(input.userHome, ".gemini", ...segments);
       yield* Effect.gen(function* () {
@@ -398,6 +411,7 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
   readonly auth?: AntigravityAuthConfig;
   readonly userHome?: string;
   readonly tempDirectory?: string;
+  readonly extraSkillRoots?: ReadonlyArray<string>; // fork: shared synced Claude skill roots
 }) {
   const auth = input.auth ?? ANTIGRAVITY_PERSONAL_AUTH;
   const fs = yield* FileSystem.FileSystem;
@@ -536,9 +550,25 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
         authSupportError("The Antigravity profile settings could not be written."),
       ),
     );
-  yield* linkAntigravityUserConfig({ profileDirectory: geminiHome, userHome, platform });
+  // fork: write or clean up profile config/skills.json overlay for shared synced Claude skills
+  const managedSkillsJson = yield* prepareAntigravitySyncedSkillsConfig({
+    profileDirectory: geminiHome,
+    userHome,
+    platform,
+    extraSkillRoots: input.extraSkillRoots ?? [],
+  });
+  yield* linkAntigravityUserConfig({
+    profileDirectory: geminiHome,
+    userHome,
+    platform,
+    skipSkillsJson: managedSkillsJson,
+  });
   if (platform === "win32") {
-    yield* copyAntigravityUserConfigFiles({ profileDirectory: geminiHome, userHome });
+    yield* copyAntigravityUserConfigFiles({
+      profileDirectory: geminiHome,
+      userHome,
+      skipSkillsJson: managedSkillsJson,
+    });
   }
   return profile;
 });

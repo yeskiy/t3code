@@ -102,6 +102,7 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   homePath: "",
   shadowHomePath: "",
   launchArgs: "",
+  claudeSyncedSkillsInstance: "claudeAgent", // fork: claude.ai synced skills
   customModels: [],
   ...overrides,
 });

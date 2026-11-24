@@ -771,6 +771,46 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
     }),
   );
 
+  // fork: profile config/skills.json inherits user config and appends shared synced skill roots
+  it.effect(
+    "writes profile config/skills.json for extraSkillRoots and restores user copy when cleared",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temporaryDirectory = yield* fs.makeTempDirectoryScoped();
+        const userHome = path.join(temporaryDirectory, "home");
+        const profileDirectory = path.join(temporaryDirectory, "profile");
+        const bucketDirectory = path.join(temporaryDirectory, "claude", "skills", "synced", "b1");
+        const userSkillsJson = path.join(userHome, ".gemini", "config", "skills.json");
+        const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
+        const userContents = '{"entries":[{"path":"C:/user-skills"}]}';
+
+        yield* fs.makeDirectory(path.dirname(userSkillsJson), { recursive: true });
+        yield* fs.writeFileString(userSkillsJson, userContents);
+
+        yield* prepareAntigravityProfile({
+          profileDirectory,
+          userHome,
+          platform: "win32",
+          extraSkillRoots: [bucketDirectory],
+        });
+        expect(yield* fs.readFileString(userSkillsJson)).toBe(userContents);
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          inherits: [{ path: userSkillsJson.replaceAll("\\", "/") }],
+          entries: [{ path: bucketDirectory.replaceAll("\\", "/") }],
+        });
+
+        yield* prepareAntigravityProfile({
+          profileDirectory,
+          userHome,
+          platform: "win32",
+          extraSkillRoots: [],
+        });
+        expect(yield* fs.readFileString(profileSkillsJson)).toBe(userContents);
+      }),
+  );
+
   it.effect("rewrites the GCP block on every launch and never stores the API key", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

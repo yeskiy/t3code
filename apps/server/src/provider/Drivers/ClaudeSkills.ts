@@ -13,6 +13,11 @@ import { parse as parseYamlDocument } from "yaml";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 import { claudeAccountConfigPath, readClaudeOauthAccount } from "../claudeResetCredits.ts";
+// fork: claude.ai synced skills support
+import {
+  CLAUDE_SYNCED_SKILL_PREFIX,
+  discoverClaudeSyncedSkillRoots,
+} from "../../fork/syncedSkills/ClaudeSyncedSkills.ts";
 
 type ClaudeSkillScope = "user" | "project";
 
@@ -20,6 +25,7 @@ type ClaudeSkillRoot = {
   readonly directory: string;
   readonly scope: ClaudeSkillScope;
   readonly prefix?: string;
+  readonly syncedSkill?: boolean; // fork: claude.ai synced skill root
 };
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -240,6 +246,7 @@ const SkillSettings = fromLenientJson(
     skillOverrides: Schema.optional(Schema.Record(Schema.String, SkillOverrideValue)),
     enabledPlugins: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     syncClaudeAiPlugins: Schema.optional(Schema.Unknown),
+    syncClaudeAiSkills: Schema.optional(Schema.Unknown), // fork: claude.ai synced skills
   }),
 );
 const decodeSkillSettings = Schema.decodeUnknownEffect(SkillSettings);
@@ -274,6 +281,8 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
   const managedPluginNames = new Set<string>();
   const managedPaths = new Set(claudeManagedSettingsPaths(path, platform, environment));
   let syncedPluginsHidden = false;
+  // fork: track syncClaudeAiSkills: false across user, local, and managed settings
+  const syncedSkillsHiddenState = { hidden: false };
   const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
   const projectSettingsPath =
     cwd === undefined ? undefined : path.join(cwd, ".claude", "settings.json");
@@ -320,6 +329,10 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
     if (parsed?.syncClaudeAiPlugins === false && settingsPath !== projectSettingsPath) {
       syncedPluginsHidden = true;
     }
+    // fork: same precedence rule for syncClaudeAiSkills
+    if (parsed?.syncClaudeAiSkills === false && settingsPath !== projectSettingsPath) {
+      syncedSkillsHiddenState.hidden = true;
+    }
   }
 
   return {
@@ -327,6 +340,7 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
     enabledPlugins,
     managedPluginNames,
     syncedPluginsHidden,
+    syncedSkillsHidden: syncedSkillsHiddenState.hidden, // fork: claude.ai synced skills
   };
 });
 
@@ -784,8 +798,13 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   const path = yield* Path.Path;
   const env = environment ?? process.env;
   const configDirPath = yield* resolveClaudeConfigDirPath(config, env, cwd);
-  const { skillOverrides, enabledPlugins, managedPluginNames, syncedPluginsHidden } =
-    yield* readSkillSettings(configDirPath, cwd, env);
+  const {
+    skillOverrides,
+    enabledPlugins,
+    managedPluginNames,
+    syncedPluginsHidden,
+    syncedSkillsHidden, // fork: claude.ai synced skills
+  } = yield* readSkillSettings(configDirPath, cwd, env);
   const managedDirectory = claudeManagedDirectory(path, yield* HostProcess.Platform, env);
   // Most installs have no synced folder; skip reading `.claude.json` for them.
   const hasSyncedPlugins =
@@ -793,9 +812,16 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
     (yield* fileSystem
       .exists(path.join(configDirPath, "plugins", "synced"))
       .pipe(Effect.orElseSucceed(() => false)));
-  const syncedBucket = hasSyncedPlugins
-    ? yield* resolveSyncedPluginBucket(config, configDirPath, env)
-    : undefined;
+  // fork: check for claude.ai synced skills folder
+  const hasSyncedSkills =
+    !syncedSkillsHidden &&
+    (yield* fileSystem
+      .exists(path.join(configDirPath, "skills", "synced"))
+      .pipe(Effect.orElseSucceed(() => false)));
+  const syncedBucket =
+    hasSyncedPlugins || hasSyncedSkills
+      ? yield* resolveSyncedPluginBucket(config, configDirPath, env)
+      : undefined;
   // Claude applies its settings `env` over the inherited environment.
   const inlinePluginDirectories =
     (yield* readClaudeSettingsEnv(config, cwd, env)).CLAUDE_CODE_PLUGIN_DIRS ??
@@ -826,9 +852,18 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       cwd,
       enabledPlugins,
       inlinePlugins.names,
-      syncedBucket,
+      hasSyncedPlugins ? syncedBucket : undefined,
       env,
     )),
+    // fork: discover claude.ai synced skills for this account bucket
+    ...(hasSyncedSkills
+      ? (yield* discoverClaudeSyncedSkillRoots(configDirPath, syncedBucket)).map((directory) => ({
+          directory,
+          scope: "user" as const,
+          prefix: CLAUDE_SYNCED_SKILL_PREFIX,
+          syncedSkill: true,
+        }))
+      : []),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -862,6 +897,8 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
 
       const directoryName = entry.trim();
       if (!directoryName) continue;
+      // fork: Claude Code skips synced skill entries whose folder name contains ':'
+      if (root.syncedSkill && directoryName.includes(":")) continue;
       let name = directoryName;
       if (root.prefix) {
         // Native folder skills use their folder; only a single SKILL.md uses its name field.
@@ -875,11 +912,17 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         if (mention?.[2] !== name) continue;
       }
 
-      if (skillsByName.has(name)) {
+      // fork: an existing skill with the same bare name wins over a synced skill
+      if (skillsByName.has(name) || (root.syncedSkill && skillsByName.has(directoryName))) {
         continue;
       }
 
-      const override = root.prefix ? undefined : skillOverrides.get(name);
+      // fork: apply skillOverrides to synced skills by full or bare name
+      const override = root.syncedSkill
+        ? (skillOverrides.get(name) ?? skillOverrides.get(directoryName))
+        : root.prefix
+          ? undefined
+          : skillOverrides.get(name);
       const userInvocationOnly =
         (frontmatter.kind === "parsed" && frontmatter.userInvocationOnly === true) ||
         override?.userInvocationOnly === true;

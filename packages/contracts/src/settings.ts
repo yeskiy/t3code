@@ -772,13 +772,29 @@ export const CodexSettings = makeProviderSettingsSchema(
         description: "Additional CLI arguments passed to codex app-server on session start.",
       }),
     ),
+    // fork: share synced Claude skills from a Claude instance (empty = off)
+    claudeSyncedSkillsInstance: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("claudeAgent")),
+      Schema.annotateKey({
+        title: "Synced Claude skills",
+        description:
+          "Claude instance ID whose claude.ai synced skills to share. Leave empty to disable.",
+        providerSettingsForm: { placeholder: "claudeAgent", clearWhenEmpty: "persist" },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "shadowHomePath",
+      "launchArgs",
+      "claudeSyncedSkillsInstance", // fork: share synced Claude skills
+    ],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;
@@ -954,12 +970,31 @@ export const AntigravitySettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "Automatic", clearWhenEmpty: "persist" },
       }),
     ),
+    // fork: share synced Claude skills from a Claude instance (empty = off)
+    claudeSyncedSkillsInstance: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("claudeAgent")),
+      Schema.annotateKey({
+        title: "Synced Claude skills",
+        description:
+          "Claude instance ID whose claude.ai synced skills to share. Leave empty to disable.",
+        providerSettingsForm: { placeholder: "claudeAgent", clearWhenEmpty: "persist" },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
-  { order: ["authMethod", "apiKey", "gcpProject", "gcpLocation", "binaryPath"] },
+  {
+    order: [
+      "authMethod",
+      "apiKey",
+      "gcpProject",
+      "gcpLocation",
+      "binaryPath",
+      "claudeSyncedSkillsInstance", // fork: share synced Claude skills
+    ],
+  },
 );
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 

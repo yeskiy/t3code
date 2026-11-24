@@ -8,10 +8,12 @@ import {
   ProviderInstanceId,
 } from "./providerInstance.ts";
 import {
+  AntigravitySettings, // fork: claude.ai synced skills setting test
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClientServerSettingsPatch,
   ClaudeSettings,
+  CodexSettings, // fork: claude.ai synced skills setting test
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
@@ -553,5 +555,27 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+// fork: claudeSyncedSkillsInstance defaults to claudeAgent and preserves empty string (off)
+describe("claudeSyncedSkillsInstance provider setting", () => {
+  const decodeAntigravity = Schema.decodeUnknownSync(AntigravitySettings);
+  const decodeCodex = Schema.decodeUnknownSync(CodexSettings);
+
+  it("defaults to claudeAgent and preserves empty string to disable", () => {
+    expect(decodeAntigravity({}).claudeSyncedSkillsInstance).toBe("claudeAgent");
+    expect(decodeAntigravity({ claudeSyncedSkillsInstance: "" }).claudeSyncedSkillsInstance).toBe(
+      "",
+    );
+    expect(
+      decodeAntigravity({ claudeSyncedSkillsInstance: " claude-alt " }).claudeSyncedSkillsInstance,
+    ).toBe("claude-alt");
+
+    expect(decodeCodex({}).claudeSyncedSkillsInstance).toBe("claudeAgent");
+    expect(decodeCodex({ claudeSyncedSkillsInstance: "" }).claudeSyncedSkillsInstance).toBe("");
+    expect(
+      decodeCodex({ claudeSyncedSkillsInstance: " claude-alt " }).claudeSyncedSkillsInstance,
+    ).toBe("claude-alt");
   });
 });
