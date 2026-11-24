@@ -132,6 +132,9 @@ function curatedCauseMessages(cause: unknown): {
         case "AcpModelSelectionError":
         case "ClaudeBackgroundWorkBlocksQueryReplacementError":
         case "ClaudeAppendSystemPromptFileError":
+        // fork: per-instance launch errors surface their own message
+        case "ForkMcpConfigError":
+        case "ForkPrepareCommandError":
         case "ClaudeAppendSystemPromptMissingValueError":
         case "ClaudeSettingsLaunchArgError":
         case "ClaudeMcpRegistrationTimeoutError":

@@ -1,4 +1,4 @@
-import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
+import type { ForkTurnAgent, OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
 import {
   type AgentFeedbackMode,
   ChatAttachment,
@@ -607,6 +607,8 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  // fork: agent definitions
+  readonly forkAgent?: ForkTurnAgent;
 }
 
 export type ProviderAdapterV2ResumeTurnInput = Omit<

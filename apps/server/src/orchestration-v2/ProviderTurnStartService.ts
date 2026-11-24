@@ -167,6 +167,9 @@ const isProviderAdapterOpenSessionError = Schema.is(
 const PROMPT_REFUSAL_TAGS = [
   "ClaudeBackgroundWorkBlocksQueryReplacementError",
   "ClaudeAppendSystemPromptFileError",
+  // fork: per-instance launch fails before the prompt reaches Claude
+  "ForkMcpConfigError",
+  "ForkPrepareCommandError",
   "ClaudeAppendSystemPromptMissingValueError",
   "ClaudeSettingsLaunchArgError",
   "ClaudeMcpRegistrationTimeoutError",

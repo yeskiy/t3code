@@ -68,10 +68,14 @@ import { ThreadToolkit } from "./thread/tools.ts";
 import * as PeerForwarding from "../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../peer/PeerLinkRequests.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
+// fork: agent definitions
+import { forkDelegationAgentsLayerEmpty } from "../../fork/delegationAgents/delegationHooks.ts";
 
 const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  // fork: agent definitions
+  Layer.provide(forkDelegationAgentsLayerEmpty),
 );
 
 const declaredFailure = (result: McpSchema.CallToolResult) => {

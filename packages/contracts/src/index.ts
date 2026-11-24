@@ -82,3 +82,7 @@ export * from "./clientRpcPermissions.ts";
 export * from "./forkToolCall.ts";
 // fork: per-provider MCP tool scope
 export * from "./forkMcpScope.ts";
+// fork: neutral delegation agent definitions
+export * from "./forkDelegationAgent.ts";
+// fork: Claude launch fields
+export * from "./forkInstanceLaunch.ts";

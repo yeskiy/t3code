@@ -329,6 +329,43 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.isDefined(withT3.additionalContext?.["t3_code_runtime"]);
     }),
   );
+
+  // fork: agent definitions
+  it.effect("sends forkAgent instructions as numbered application additionalContext entries", () =>
+    Effect.gen(function* () {
+      const policy = { runtimeMode: "full-access", interactionMode: "default", cwd: null } as const;
+      const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+      const forkAgent = {
+        name: "researcher",
+        limits: ["read-only", "no-delegation"] as const,
+        instructions: `${"a".repeat(4000)}${"b".repeat(500)}`,
+      };
+      const alone = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-fork-agent",
+        codexInput: [{ type: "text", text: "Inspect." }],
+        runtimePolicy: policy,
+        modelSelection,
+        forkAgent,
+      });
+      assert.deepEqual(alone.additionalContext, {
+        t3_code_agent_01: { kind: "application", value: "a".repeat(4000) },
+        t3_code_agent_02: { kind: "application", value: "b".repeat(500) },
+      });
+      const withApp = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-fork-agent-app",
+        codexInput: [{ type: "text", text: "Inspect." }],
+        runtimePolicy: policy,
+        modelSelection,
+        forkAgent,
+        appContext: [{ key: "mcp_app_item-1", text: "note" }],
+      });
+      assert.deepEqual(Object.keys(withApp.additionalContext ?? {}), [
+        "t3_code_agent_01",
+        "t3_code_agent_02",
+        "mcp_app_item-1",
+      ]);
+    }),
+  );
 });
 
 describe("CodexAdapterV2 native protocol logging", () => {

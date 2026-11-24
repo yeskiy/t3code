@@ -9257,6 +9257,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasT3Mcp: mcpSession !== undefined,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
+            // fork: agent definitions
+            ...(turnInput.forkAgent === undefined
+              ? {}
+              : { forkAgentInstructions: turnInput.forkAgent.instructions }),
           } satisfies T3AcpInstructionState;
           const userText =
             flavor.rewriteUserText === undefined
