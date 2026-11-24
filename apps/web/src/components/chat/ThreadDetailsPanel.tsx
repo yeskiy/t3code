@@ -49,6 +49,7 @@ import {
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
 import { ForkThreadDetailsArtifactsRow } from "~/fork/artifacts/ForkThreadDetailsArtifactsRow"; // fork: artifacts panel
+import { useForkThreadDetailsItems } from "~/fork/artifacts/forkThreadDetailsItems"; // fork: artifacts panel
 
 interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
@@ -98,6 +99,7 @@ interface ThreadDetailsPanelProps extends Pick<
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
+  const items = useForkThreadDetailsItems(THREAD_DETAILS_ITEMS); // fork: artifacts panel
   const gt = useGT();
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const fileScripts = useT3ProjectFileScripts(
@@ -159,7 +161,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
-      contentKey={THREAD_DETAILS_ITEMS.filter((item) => visible[item.id])
+      contentKey={items
+        .filter((item) => visible[item.id])
         .map((item) => item.id)
         .join(",")}
       onContextMenu={(event) => {
@@ -330,7 +333,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               ) : null}
 
               {/* fork: artifacts quick link in thread details */}
-              {!props.draftId ? (
+              {!props.draftId && visible.artifacts ? (
                 <ForkThreadDetailsArtifactsRow threadRef={activeThreadRef} />
               ) : null}
 

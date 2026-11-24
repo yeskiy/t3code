@@ -13,12 +13,14 @@ import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
 import { useSearchableSetting } from "./settingsSearch";
+import { useForkThreadDetailsItems } from "~/fork/artifacts/forkThreadDetailsItems"; // fork: artifacts panel
 
 export function ThreadDetailsItemsRow() {
   const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const visibility = useClientSettings(resolveThreadDetailsVisibility);
-  const enabled = THREAD_DETAILS_ITEMS.filter((item) => visibility[item.id]).length;
+  const items = useForkThreadDetailsItems(THREAD_DETAILS_ITEMS); // fork: artifacts panel
+  const enabled = items.filter((item) => visibility[item.id]).length;
   return (
     <SettingsRow
       {...searchableSetting("thread-details-items")}
@@ -26,7 +28,7 @@ export function ThreadDetailsItemsRow() {
         "Choose what the thread details card shows. You can also right-click the card.",
       )}
       resetAction={
-        isDefaultThreadDetailsVisibility(visibility) ? null : (
+        isDefaultThreadDetailsVisibility(visibility, items) ? null : (
           <SettingResetButton
             ariaLabel={gt("Reset thread details to default")}
             onClick={() => updateClientSettings(RESET_THREAD_DETAILS_ITEMS)}
@@ -43,13 +45,13 @@ export function ThreadDetailsItemsRow() {
                 className="w-full justify-between sm:w-40"
                 aria-label={gt("Thread details: {enabled} of {total} on", {
                   enabled,
-                  total: THREAD_DETAILS_ITEMS.length,
+                  total: items.length,
                 })}
               />
             }
           >
             <T>
-              <Var>{enabled}</Var> of <Var>{THREAD_DETAILS_ITEMS.length}</Var> on
+              <Var>{enabled}</Var> of <Var>{items.length}</Var> on
             </T>
             <ChevronDownIcon aria-hidden />
           </MenuTrigger>
