@@ -96,6 +96,7 @@ describe("pullRequestLinkContextMenu", () => {
       openLabel: "Open on GitHub",
       position: { x: 10, y: 20 },
       onOpenInApp,
+      source: "mouse",
     });
 
     expect(state.showMenu).toHaveBeenCalledWith(
@@ -104,6 +105,7 @@ describe("pullRequestLinkContextMenu", () => {
         expect.objectContaining({ id: "open-in-app", label: "Open in T3" }),
       ],
       { x: 10, y: 20 },
+      "mouse",
     );
     expect(onOpenInApp).toHaveBeenCalledTimes(1);
     expect(state.openExternal).not.toHaveBeenCalled();
@@ -119,6 +121,7 @@ describe("pullRequestLinkContextMenu", () => {
       openLabel: "Open on GitHub",
       position: { x: 10, y: 20 },
       onOpenInApp,
+      source: "mouse",
     });
 
     expect(state.showMenu).toHaveBeenCalledWith(
@@ -127,6 +130,7 @@ describe("pullRequestLinkContextMenu", () => {
         expect.objectContaining({ id: "open-external", label: "Open externally" }),
       ],
       { x: 10, y: 20 },
+      "mouse",
     );
     expect(state.openExternal).toHaveBeenCalledWith("https://github.com/org/repo/pull/42");
     expect(onOpenInApp).not.toHaveBeenCalled();
@@ -139,6 +143,7 @@ describe("pullRequestLinkContextMenu", () => {
       url: "javascript:alert(1)",
       openLabel: "Open on host",
       position: { x: 10, y: 20 },
+      source: "mouse",
     });
 
     expect(state.openExternal).not.toHaveBeenCalled();

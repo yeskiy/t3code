@@ -13,8 +13,9 @@ import * as Option from "effect/Option";
 import * as Electron from "electron";
 
 // Remote editor deep links and local editor file links must reach the OS handler.
-// fork: allow mailto links to open in the system mail app.
-const SAFE_WEB_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+const SAFE_WEB_PROTOCOLS = new Set(["http:", "https:"]);
+// fork: allow mailto links via openExternal without treating them as web URLs.
+const isMailtoUrl = (url: URL) => url.protocol === "mailto:";
 const REMOTE_EDITOR_PROTOCOLS = new Set(
   REMOTE_CAPABLE_EDITOR_IDS.flatMap((id) => {
     const scheme = remoteSchemeForEditor(id);
@@ -58,6 +59,7 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
   try {
     const url = new URL(rawUrl);
     return SAFE_WEB_PROTOCOLS.has(url.protocol) ||
+      isMailtoUrl(url) ||
       isAppLaunchUrl(url) ||
       isRemoteEditorUrl(url) ||
       isLocalEditorFileUrl(url)
@@ -67,6 +69,12 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
     return Option.none();
   }
 }
+
+/** Links that open in the browser, for callers such as popups that carry no identity. */
+export const parseWebExternalUrl = (rawUrl: unknown): Option.Option<string> =>
+  Option.filter(parseSafeExternalUrl(rawUrl), (url) =>
+    SAFE_WEB_PROTOCOLS.has(new URL(url).protocol),
+  );
 
 export class ElectronShell extends Context.Service<
   ElectronShell,

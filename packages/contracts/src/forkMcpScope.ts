@@ -38,12 +38,13 @@ export const FORK_MCP_TOOL_GROUPS: ReadonlyArray<ForkMcpToolGroupDefinition> = [
   {
     id: "delegation",
     label: "Delegation and background",
-    description: "Start and manage child agents, stop workflows, and wait on background tasks.",
+    description: "Start and manage child agents, workflows, and background tasks.",
     tools: [
       "orchestrator_capabilities",
       "delegate_task",
       "task_status",
       "task_cancel",
+      "t3_workflow",
       "t3_workflow_stop",
       "t3_background_wait",
     ],
@@ -184,13 +185,14 @@ export const FORK_MCP_TOOL_GROUPS: ReadonlyArray<ForkMcpToolGroupDefinition> = [
   {
     id: "environments",
     label: "Environments",
-    description: "Read and change environment settings and manage linked machines.",
+    description: "Read and change environment settings, manage linked machines, and send feedback.",
     tools: [
       "t3_environment_read",
       "t3_environment_preferences_update",
       "t3_environment_links",
       "t3_environment_link",
       "t3_environment_unlink",
+      "t3_feedback",
     ],
   },
   {

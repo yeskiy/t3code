@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { beforeEach, vi } from "vite-plus/test";
 
 const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
@@ -65,6 +66,25 @@ describe("ElectronShell", () => {
       assert.deepEqual(openExternalMock.mock.calls, [["mailto:someone@example.com"]]);
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
+
+  it("never treats mailto links as web URLs in parseWebExternalUrl", () => {
+    assert.deepEqual(
+      ElectronShell.parseWebExternalUrl("https://example.com/path"),
+      Option.some("https://example.com/path"),
+    );
+    assert.deepEqual(
+      ElectronShell.parseWebExternalUrl("http://localhost:3000/"),
+      Option.some("http://localhost:3000/"),
+    );
+    assert.deepEqual(
+      ElectronShell.parseWebExternalUrl("mailto:someone@example.com"),
+      Option.none(),
+    );
+    assert.deepEqual(
+      ElectronShell.parseWebExternalUrl("vscode://file/Users/me/repo/file.md:3"),
+      Option.none(),
+    );
+  });
 
   it.effect("opens only the Grok Bot prompt link", () =>
     Effect.gen(function* () {

@@ -45,6 +45,8 @@ describe("forkMcpScope", () => {
     expect(isForkMcpToolAllowed(standard, "request_secret")).toBe(true);
     expect(isForkMcpToolAllowed(standard, "send_to_user")).toBe(true);
     expect(isForkMcpToolAllowed(standard, "delegate_task")).toBe(false);
+    expect(isForkMcpToolAllowed(standard, "t3_workflow")).toBe(false);
+    expect(isForkMcpToolAllowed(standard, "t3_feedback")).toBe(false);
     expect(isForkMcpToolAllowed(standard, "t3_thread_send")).toBe(false);
     expect(isForkMcpToolAllowed(standard, "t3_project_delete")).toBe(false);
     expect(isForkMcpToolAllowed(standard, "t3_theme_set")).toBe(false);

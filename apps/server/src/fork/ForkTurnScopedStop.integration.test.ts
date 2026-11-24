@@ -278,11 +278,11 @@ const stopWithBackgroundWork = (input: {
         yield* worker.drain();
 
         if (input.settled === true) {
-          const waiting = yield* watch(
+          const settled = yield* watch(
             (event) =>
               event.type === "run.updated" &&
               event.payload.id === run.id &&
-              event.payload.status === "waiting",
+              event.payload.status === "completed",
           );
           const events = eventsByProviderThread.get(providerTurn.providerThreadId)!;
           runningTurns.delete(providerTurn.id);
@@ -301,7 +301,7 @@ const stopWithBackgroundWork = (input: {
             failure: null,
             threadDisposition: "reusable",
           });
-          yield* Fiber.join(waiting);
+          yield* Fiber.join(settled);
           yield* worker.drain();
         }
 

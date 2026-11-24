@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, ContextMenuSource } from "@t3tools/contracts";
 import {
   type SourceControlDefinition,
   UNKNOWN_SOURCE_CONTROL_CLIENT,
@@ -47,11 +47,13 @@ export async function showPullRequestLinkContextMenu({
   openLabel,
   position,
   onOpenInApp,
+  source,
 }: {
   readonly url: string;
   readonly openLabel: string;
   readonly position: { readonly x: number; readonly y: number };
   readonly onOpenInApp?: (() => Promise<void> | void) | undefined;
+  readonly source: ContextMenuSource;
 }): Promise<void> {
   const api = readLocalApi();
   if (!api) return;
@@ -64,6 +66,7 @@ export async function showPullRequestLinkContextMenu({
     action = await api.contextMenu.show(
       pullRequestLinkContextMenuItems(openLabel, forkOpenEntry),
       position,
+      source,
     );
   } catch {
     return;

@@ -122,6 +122,8 @@ function openMenu(source: MediaActionSource) {
     preventDefault() {},
     stopPropagation() {},
     currentTarget: { getBoundingClientRect: () => ({ left: 0, bottom: 0 }) },
+    type: "contextmenu",
+    button: 2,
     clientX: 1,
     clientY: 1,
   });
@@ -164,6 +166,7 @@ it.each(["workspace-file", "media-file"] as const)(
         expect.objectContaining({ id: "open-file", disabled: true }),
       ]),
       { x: 1, y: 1 },
+      "mouse",
     );
     await expect(useMediaActions(source).save()).rejects.toThrow("cannot read host files");
     await expect(useMediaActions(source).copyImage()).rejects.toThrow("cannot read host files");
@@ -230,6 +233,7 @@ it("offers Open in T3 when Open files in is external and Open externally when se
   expect(state.showMenu).toHaveBeenLastCalledWith(
     expect.arrayContaining([expect.objectContaining({ id: "open-file", label: "Open in T3" })]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() => expect(state.openFile).toHaveBeenCalledTimes(1));
   expect(forkOpenPath).not.toHaveBeenCalled();
@@ -242,6 +246,7 @@ it("offers Open in T3 when Open files in is external and Open externally when se
       expect.objectContaining({ id: "fork-open-external", label: "Open externally" }),
     ]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() =>
     expect(forkOpenPath).toHaveBeenCalledWith({ environmentId, path: "/repo/image.png" }),
@@ -272,6 +277,7 @@ it("offers Open in T3 or Open externally for web URL media based on Open links i
       expect.objectContaining({ id: "fork-open-in-t3", label: "Open in T3" }),
     ]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() => expect(onOpenInApp).toHaveBeenCalledTimes(1));
 
@@ -283,6 +289,7 @@ it("offers Open in T3 or Open externally for web URL media based on Open links i
       expect.objectContaining({ id: "fork-open-external", label: "Open externally" }),
     ]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() =>
     expect(state.openExternal).toHaveBeenCalledWith("https://example.com/photo.png"),
@@ -324,6 +331,7 @@ it("offers Open in T3 (lightbox) or Open externally for outside-workspace local 
       expect.objectContaining({ id: "fork-open-in-t3", label: "Open in T3", disabled: false }),
     ]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() => expect(onOpenInApp).toHaveBeenCalledTimes(1));
   expect(forkOpenPath).not.toHaveBeenCalled();
@@ -340,6 +348,7 @@ it("offers Open in T3 (lightbox) or Open externally for outside-workspace local 
       }),
     ]),
     { x: 1, y: 1 },
+    "mouse",
   );
   await vi.waitFor(() =>
     expect(forkOpenPath).toHaveBeenCalledWith({ environmentId, path: "/tmp/shot.png" }),

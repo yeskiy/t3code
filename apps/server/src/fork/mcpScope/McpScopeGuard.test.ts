@@ -24,6 +24,8 @@ import { ServerConfig } from "../../config.ts";
 import { DeviceService } from "../../device/DeviceService.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { EnvironmentThemeService } from "../../environmentTheme.ts";
+import { FeedbackService } from "../../feedback/FeedbackService.ts";
+import { FeedbackStore } from "../../feedback/FeedbackStore.ts";
 import { GitManager } from "../../git/GitManager.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { IssueService } from "../../issue/IssueService.ts";
@@ -59,6 +61,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import { SourceControlRepositoryService } from "../../sourceControl/SourceControlRepositoryService.ts";
 import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { Workflows } from "../../workflows/Workflows.ts";
 import { TaskFolders } from "../../workspace/TaskFolders.ts";
 import { applyForkMcpSessionCapabilities } from "./McpScopeGuard.ts";
 
@@ -69,6 +72,8 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(DeviceService)({}),
   Layer.mock(DocumentText)({}),
   Layer.mock(EnvironmentThemeService)({}),
+  Layer.mock(FeedbackService)({}),
+  Layer.mock(FeedbackStore)({}),
   Layer.mock(GitVcsDriver)({}),
   Layer.mock(GitWorkflowService)({}),
   Layer.mock(TaskFolders)({}),
@@ -103,6 +108,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(ThreadSearch)({}),
   Layer.mock(VcsStatusBroadcaster)({}),
+  Layer.mock(Workflows)({}),
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const layerRegisteredTools = Layer.mergeAll(
