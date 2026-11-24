@@ -99,9 +99,10 @@ export const forkAgentsCapability = (
   agents.length === 0
     ? {}
     : {
-        agents: agents.map(({ name, description, roles, limits }) => ({
+        agents: agents.map(({ name, description, provider, roles, limits }) => ({
           name,
           description,
+          ...(provider === undefined ? {} : { provider }),
           roles: [...roles],
           limits: [...limits],
         })),
@@ -157,22 +158,48 @@ export const forkPrepareDelegation = Effect.fn("fork.prepareDelegation")(functio
   }
   const targetInstanceId = input.input.target?.providerInstanceId;
   const targetDriverKind = input.input.target?.driverKind;
+  const wantsAgentProvider =
+    targetInstanceId === undefined &&
+    targetDriverKind === undefined &&
+    definition.provider !== undefined;
+  const agentProvider = wantsAgentProvider
+    ? input.providers.find((candidate) => candidate.instanceId === definition.provider)
+    : undefined;
+  if (
+    wantsAgentProvider &&
+    (agentProvider === undefined ||
+      agentProvider.enabled === false ||
+      agentProvider.status === "disabled")
+  ) {
+    return yield* input.failure(
+      "invalid_request",
+      `Agent ${definition.name} names provider ${definition.provider}, which is not available.`,
+    );
+  }
+  const baseTarget: OrchestratorMcpTarget | undefined =
+    agentProvider === undefined
+      ? input.input.target
+      : {
+          ...input.input.target,
+          providerInstanceId: agentProvider.instanceId,
+        };
   const matchedProvider =
-    targetInstanceId !== undefined
+    agentProvider ??
+    (targetInstanceId !== undefined
       ? input.providers.find((candidate) => candidate.instanceId === targetInstanceId)
       : targetDriverKind !== undefined
         ? input.providers.find((candidate) => candidate.driver === targetDriverKind)
-        : input.providers.find((candidate) => candidate.instanceId === input.instanceId);
+        : input.providers.find((candidate) => candidate.instanceId === input.instanceId));
   const driver =
-    targetInstanceId !== undefined
+    agentProvider !== undefined || targetInstanceId !== undefined
       ? matchedProvider?.driver
       : (targetDriverKind ?? matchedProvider?.driver);
   const target =
     driver === undefined
-      ? input.input.target
+      ? baseTarget
       : applyAgentDefaults({
-          target: input.input.target,
-          instanceId: input.instanceId,
+          target: baseTarget,
+          instanceId: agentProvider?.instanceId ?? input.instanceId,
           driver,
           defaults: definition.defaults,
           effortOptionId: reasoningOptionIdFor(matchedProvider, definition.defaults[driver]?.model),

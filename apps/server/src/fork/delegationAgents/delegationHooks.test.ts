@@ -58,12 +58,18 @@ const fakeAgents = (
 const provider = (
   instanceId: string,
   driver: string,
-  models: ServerProvider["models"] = [],
+  options: {
+    readonly models?: ServerProvider["models"];
+    readonly enabled?: boolean;
+    readonly status?: ServerProvider["status"];
+  } = {},
 ): ServerProvider =>
   ({
     instanceId: ProviderInstanceId.make(instanceId),
     driver: ProviderDriverKind.make(driver),
-    models,
+    enabled: options.enabled ?? true,
+    status: options.status ?? "ready",
+    models: options.models ?? [],
   }) as unknown as ServerProvider;
 
 describe("forkClaudeAgentParts", () => {
@@ -201,6 +207,25 @@ describe("forkAgentsCapability", () => {
       ],
     });
   });
+
+  it("includes provider in the summary when the agent defines one", () => {
+    const contentAgent: ForkAgentDefinition = {
+      ...sampleDefinition,
+      name: "content",
+      provider: "antigravity",
+    };
+    expect(forkAgentsCapability([contentAgent])).toEqual({
+      agents: [
+        {
+          name: "content",
+          description: "Read-only research.",
+          provider: "antigravity",
+          roles: ["research", "review"],
+          limits: ["read-only", "no-delegation"],
+        },
+      ],
+    });
+  });
 });
 
 describe("forkAssertCanDelegate", () => {
@@ -323,6 +348,205 @@ describe("forkPrepareDelegation", () => {
           options: [{ id: "reasoningEffort", value: "low" }],
         });
       }),
+  );
+
+  it.effect(
+    "uses the agent provider and applies its driver defaults when caller omits provider and driver",
+    () =>
+      Effect.gen(function* () {
+        const contentAgent: ForkAgentDefinition = {
+          ...sampleDefinition,
+          name: "content",
+          provider: "antigravity",
+          defaults: {
+            claudeAgent: { model: "claude-opus-5-5", effort: "medium" },
+            antigravity: { model: "gemini-4-neon", effort: "high" },
+          },
+        };
+        const result = yield* forkPrepareDelegation({
+          agents: fakeAgents({
+            resolveForTask: () => Effect.succeed(contentAgent),
+          }),
+          input: { agent: "content" },
+          callerThreadId: ThreadId.make("thread:parent"),
+          providers: [...providers, provider("antigravity", "antigravity")],
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          failure,
+        });
+        expect(result.target).toEqual({
+          providerInstanceId: "antigravity",
+          model: "gemini-4-neon",
+          options: [{ id: "effort", value: "high" }],
+        });
+      }),
+  );
+
+  it.effect("uses the agent provider even when defaults omit its driver", () =>
+    Effect.gen(function* () {
+      const contentAgent: ForkAgentDefinition = {
+        ...sampleDefinition,
+        name: "content",
+        provider: "antigravity",
+        defaults: {},
+      };
+      const result = yield* forkPrepareDelegation({
+        agents: fakeAgents({
+          resolveForTask: () => Effect.succeed(contentAgent),
+        }),
+        input: { agent: "content" },
+        callerThreadId: ThreadId.make("thread:parent"),
+        providers: [...providers, provider("antigravity", "antigravity")],
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        failure,
+      });
+      expect(result.target).toEqual({
+        providerInstanceId: "antigravity",
+      });
+    }),
+  );
+
+  it.effect("keeps caller model and options while applying the agent provider", () =>
+    Effect.gen(function* () {
+      const contentAgent: ForkAgentDefinition = {
+        ...sampleDefinition,
+        name: "content",
+        provider: "antigravity",
+        defaults: {
+          antigravity: { model: "gemini-4-neon", effort: "high" },
+        },
+      };
+      const modelResult = yield* forkPrepareDelegation({
+        agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+        input: { agent: "content", target: { model: "gemini-custom" } },
+        callerThreadId: ThreadId.make("thread:parent"),
+        providers: [...providers, provider("antigravity", "antigravity")],
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        failure,
+      });
+      expect(modelResult.target).toEqual({
+        providerInstanceId: "antigravity",
+        model: "gemini-custom",
+      });
+
+      const optionsResult = yield* forkPrepareDelegation({
+        agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+        input: {
+          agent: "content",
+          target: { options: [{ id: "effort", value: "low" }] },
+        },
+        callerThreadId: ThreadId.make("thread:parent"),
+        providers: [...providers, provider("antigravity", "antigravity")],
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        failure,
+      });
+      expect(optionsResult.target).toEqual({
+        providerInstanceId: "antigravity",
+        model: "gemini-4-neon",
+        options: [{ id: "effort", value: "low" }],
+      });
+    }),
+  );
+
+  it.effect("lets caller provider and driver win over the agent provider", () =>
+    Effect.gen(function* () {
+      const contentAgent: ForkAgentDefinition = {
+        ...sampleDefinition,
+        name: "content",
+        provider: "antigravity",
+        defaults: {
+          claudeAgent: { model: "claude-opus-5-5", effort: "medium" },
+          codex: { model: "gpt-5.4", effort: "low" },
+          antigravity: { model: "gemini-4-neon", effort: "high" },
+        },
+      };
+      const byInstance = yield* forkPrepareDelegation({
+        agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+        input: {
+          agent: "content",
+          target: { providerInstanceId: ProviderInstanceId.make("claudeWork") },
+        },
+        callerThreadId: ThreadId.make("thread:parent"),
+        providers,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        failure,
+      });
+      expect(byInstance.target).toEqual({
+        providerInstanceId: "claudeWork",
+        model: "claude-opus-5-5",
+        options: [{ id: "effort", value: "medium" }],
+      });
+
+      const byDriver = yield* forkPrepareDelegation({
+        agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+        input: {
+          agent: "content",
+          target: { driverKind: ProviderDriverKind.make("codex") },
+        },
+        callerThreadId: ThreadId.make("thread:parent"),
+        providers,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        failure,
+      });
+      expect(byDriver.target).toEqual({
+        driverKind: "codex",
+        model: "gpt-5.4",
+        options: [{ id: "reasoningEffort", value: "low" }],
+      });
+    }),
+  );
+
+  it.effect("fails with invalid_request when the agent provider is unknown or disabled", () =>
+    Effect.gen(function* () {
+      const contentAgent: ForkAgentDefinition = {
+        ...sampleDefinition,
+        name: "content",
+        provider: "antigravity",
+      };
+      const missingError = yield* Effect.flip(
+        forkPrepareDelegation({
+          agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+          input: { agent: "content" },
+          callerThreadId: ThreadId.make("thread:parent"),
+          providers,
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          failure,
+        }),
+      );
+      expect(missingError.code).toBe("invalid_request");
+      expect(missingError.message).toBe(
+        "Agent content names provider antigravity, which is not available.",
+      );
+
+      const disabledError = yield* Effect.flip(
+        forkPrepareDelegation({
+          agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+          input: { agent: "content" },
+          callerThreadId: ThreadId.make("thread:parent"),
+          providers: [...providers, provider("antigravity", "antigravity", { enabled: false })],
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          failure,
+        }),
+      );
+      expect(disabledError.code).toBe("invalid_request");
+      expect(disabledError.message).toBe(
+        "Agent content names provider antigravity, which is not available.",
+      );
+
+      const disabledStatusError = yield* Effect.flip(
+        forkPrepareDelegation({
+          agents: fakeAgents({ resolveForTask: () => Effect.succeed(contentAgent) }),
+          input: { agent: "content" },
+          callerThreadId: ThreadId.make("thread:parent"),
+          providers: [...providers, provider("antigravity", "antigravity", { status: "disabled" })],
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          failure,
+        }),
+      );
+      expect(disabledStatusError.code).toBe("invalid_request");
+      expect(disabledStatusError.message).toBe(
+        "Agent content names provider antigravity, which is not available.",
+      );
+    }),
   );
 });
 

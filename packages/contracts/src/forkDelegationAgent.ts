@@ -18,6 +18,7 @@ export const ForkDelegateTaskAgentField = Schema.optional(ForkAgentName).annotat
 export const ForkAgentSummary = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
+  provider: Schema.optional(Schema.String),
   roles: Schema.Array(Schema.String),
   limits: Schema.Array(ForkAgentLimit),
 });

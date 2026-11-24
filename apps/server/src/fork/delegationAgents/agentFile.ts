@@ -4,6 +4,11 @@ import * as Schema from "effect/Schema";
 import { parse as parseYaml } from "yaml";
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+const NonBlankString = Schema.String.check(
+  Schema.makeFilter((value) => value.trim().length > 0, {
+    expected: "a non-blank string",
+  }),
+);
 
 export class ForkAgentError extends Schema.TaggedError<ForkAgentError>()("ForkAgentError", {
   detail: Schema.String,
@@ -16,6 +21,7 @@ export class ForkAgentError extends Schema.TaggedError<ForkAgentError>()("ForkAg
 const AgentFrontmatter = Schema.Struct({
   name: ForkAgentName,
   description: Schema.String,
+  provider: Schema.optional(NonBlankString),
   roles: Schema.optional(Schema.Array(Schema.String)),
   limits: Schema.optional(Schema.Array(ForkAgentLimit)),
   skills: Schema.optional(Schema.Array(Schema.String)),
@@ -35,6 +41,7 @@ const decodeAgentFrontmatter = Schema.decodeUnknownEffect(AgentFrontmatter);
 export interface ForkAgentDefinition {
   readonly name: string;
   readonly description: string;
+  readonly provider?: string | undefined;
   readonly roles: ReadonlyArray<string>;
   readonly limits: ReadonlyArray<ForkAgentLimit>;
   readonly skills: ReadonlyArray<string>;
@@ -71,6 +78,7 @@ export const parseAgentFile = Effect.fn("fork.parseAgentFile")(function* (input:
   return {
     name: front.name,
     description: front.description,
+    ...(front.provider === undefined ? {} : { provider: front.provider.trim() }),
     roles: front.roles ?? [],
     limits: front.limits ?? [],
     skills: front.skills ?? [],

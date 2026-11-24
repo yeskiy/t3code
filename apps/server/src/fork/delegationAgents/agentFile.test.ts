@@ -46,6 +46,46 @@ describe("parseAgentFile", () => {
         body: "Do the work.",
         path: "C:/a/worker.md",
       });
+      expect(agent.provider).toBeUndefined();
+    }),
+  );
+
+  it.effect("reads and trims an optional provider instance id", () =>
+    Effect.gen(function* () {
+      const withProvider = `---\nname: content\ndescription: Content writer.\nprovider: "  antigravity  "\n---\n\nWrite content.\n`;
+      const agent = yield* parseAgentFile({ path: "C:/a/content.md", text: withProvider });
+      expect(agent.provider).toBe("antigravity");
+    }),
+  );
+
+  it.effect("fails when provider is empty or blank", () =>
+    Effect.gen(function* () {
+      const emptyError = yield* Effect.flip(
+        parseAgentFile({
+          path: "C:/a/content.md",
+          text: `---\nname: content\ndescription: Content writer.\nprovider: ""\n---\n\nWrite.\n`,
+        }),
+      );
+      expect(emptyError.message).toContain("provider");
+      expect(emptyError.message).toContain('""');
+
+      const blankError = yield* Effect.flip(
+        parseAgentFile({
+          path: "C:/a/content.md",
+          text: `---\nname: content\ndescription: Content writer.\nprovider: "   "\n---\n\nWrite.\n`,
+        }),
+      );
+      expect(blankError.message).toContain("provider");
+      expect(blankError.message).toContain('"   "');
+
+      const badTypeError = yield* Effect.flip(
+        parseAgentFile({
+          path: "C:/a/content.md",
+          text: `---\nname: content\ndescription: Content writer.\nprovider: 42\n---\n\nWrite.\n`,
+        }),
+      );
+      expect(badTypeError.message).toContain("provider");
+      expect(badTypeError.message).toContain("42");
     }),
   );
 

@@ -14,11 +14,14 @@ One agent per Markdown file at `<stateDir>\agents\<name>.md`. The file name with
 | ------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `name`        | `^[a-z][a-z0-9-]{0,39}$`                                                          | The value of `delegate_task.agent`                                                       |
 | `description` | string                                                                            | Shown in `orchestrator_capabilities`                                                     |
+| `provider`    | provider instance id (optional)                                                   | Default provider instance when the caller gives no provider or driver                    |
 | `roles`       | list of `delegate_task` role values                                               | A task with this role and no `agent` uses this agent. One role maps to one agent at most |
 | `limits`      | list of `read-only`, `no-delegation`                                              | Neutral tool limits                                                                      |
 | `skills`      | list of skill names                                                               | Inlined after the body, in this order                                                    |
 | `defaults`    | map of driver kind (`claudeAgent`, `antigravity`, `codex`) to `{ model, effort }` | Used when the target has no `model`                                                      |
 | body          | Markdown                                                                          | The agent instructions                                                                   |
+
+When an agent sets `provider` and the caller gives no provider or driver, T3 uses that instance and fails if it is unavailable.
 
 The rendered agent text delivered to a child thread:
 
