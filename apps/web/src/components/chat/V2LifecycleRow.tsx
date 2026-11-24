@@ -69,6 +69,8 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { subagentResumedSince } from "./V2LifecycleRow.logic";
 import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
+// fork: Move to background
+import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
 
 export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 
@@ -189,6 +191,7 @@ export function V2LifecycleRow(props: {
         completedAt={item.completedAt}
         threadId={item.childThreadId}
         remote={item.remoteChild}
+        turnItem={item}
         onOpenThread={props.onOpenThread}
       />
     );
@@ -447,6 +450,7 @@ function SubagentTimelineLink(props: {
   readonly threadId: ThreadId | null;
   /** The thread in a linked environment that runs this task, when it runs there. */
   readonly remote?: OrchestrationV2RemoteTaskChild | undefined;
+  readonly turnItem?: OrchestrationV2TurnItem | undefined;
   readonly onOpenThread: (
     threadId: ThreadId,
     environmentId?: EnvironmentId,
@@ -545,45 +549,57 @@ function SubagentTimelineLink(props: {
     </>
   );
   const className =
-    "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+    "group/subagent flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+  const liveTurnItem =
+    props.turnItem !== undefined ? { ...props.turnItem, status: liveStatus } : undefined;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        delay={200}
-        render={
-          open === null ? (
-            <div data-v2-item-type="subagent" aria-description={statusLabel} className={className}>
-              {content}
-            </div>
-          ) : (
-            <button
-              type="button"
-              data-v2-item-type="subagent"
-              aria-label={gt("Open {title}", { title: props.title })}
-              aria-description={statusLabel}
-              {...trigger(open, { panel })}
-              className={cn(
-                className,
-                "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-              )}
-            >
-              {content}
-            </button>
-          )
-        }
-      />
-      <ThreadHoverCardPopup>
-        <SubagentTimelineTooltip
-          {...props}
-          elapsed={agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null}
-          model={agent?.model ?? null}
-          modelSelection={agent?.modelSelection}
-          status={liveStatus}
-          result={agent?.result ?? props.result}
-          progress={agent?.progress ?? props.progress}
+    <div className="flex w-full min-w-0 items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger
+          delay={200}
+          render={
+            open === null ? (
+              <div
+                data-v2-item-type="subagent"
+                aria-description={statusLabel}
+                className={className}
+              >
+                {content}
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-v2-item-type="subagent"
+                aria-label={gt("Open {title}", { title: props.title })}
+                aria-description={statusLabel}
+                {...trigger(open, { panel })}
+                className={cn(
+                  className,
+                  "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+                )}
+              >
+                {content}
+              </button>
+            )
+          }
         />
-      </ThreadHoverCardPopup>
-    </Tooltip>
+        <ThreadHoverCardPopup>
+          <SubagentTimelineTooltip
+            {...props}
+            elapsed={
+              agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null
+            }
+            model={agent?.model ?? null}
+            modelSelection={agent?.modelSelection}
+            status={liveStatus}
+            result={agent?.result ?? props.result}
+            progress={agent?.progress ?? props.progress}
+          />
+        </ThreadHoverCardPopup>
+      </Tooltip>
+      {/* fork: Move to background */}
+      {liveTurnItem !== undefined ? <ForkMoveToBackgroundButton item={liveTurnItem} /> : null}
+    </div>
   );
 }
 

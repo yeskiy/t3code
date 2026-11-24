@@ -2062,9 +2062,10 @@ export const layerWsRpc = (
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
-        // fork: Move to background for one tool call.
+        // fork: Move to background and stop for one tool call.
         [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: (input) =>
           forkToolCalls.moveToBackground(input),
+        [FORK_TOOL_CALL_WS_METHODS.stop]: (input) => forkToolCalls.stop(input),
         [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
           threadManagement.forceStopThread(input),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>

@@ -3734,6 +3734,8 @@ const CLAUDE_KNOWN_TOOL_CLASSIFICATIONS: Record<
 > = {
   agent: { itemType: "dynamic_tool", requestKind: "command" },
   bash: { itemType: "command_execution", requestKind: "command" },
+  // fork: Claude Code on Windows runs shell commands through PowerShell.
+  powershell: { itemType: "command_execution", requestKind: "command" },
   edit: { itemType: "file_change", requestKind: "file-change" },
   glob: { itemType: "dynamic_tool", requestKind: "file-read" },
   grep: { itemType: "dynamic_tool", requestKind: "file-read" },
@@ -14864,6 +14866,70 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               return moved;
             },
           ),
+          // fork: Stop one running tool call (Bash/PowerShell or subagent) without ending the turn.
+          stopToolCall: Effect.fn("ClaudeAdapterV2.stopToolCall")(function* ({
+            providerThread,
+            nativeItemId,
+          }) {
+            const liveQuery = yield* Ref.get(queryContext);
+            if (
+              liveQuery === null ||
+              liveQuery.stopping ||
+              liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId ||
+              nativeItemId.length === 0
+            ) {
+              return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                driver: CLAUDE_PROVIDER,
+                detail: "No live Claude query belongs to this provider thread",
+              });
+            }
+            const subagent = (yield* Ref.get(sessionSubagentsByTaskId)).get(nativeItemId);
+            let taskId: string | undefined;
+            if (subagent !== undefined) {
+              if (
+                subagent.task.threadId !== providerThread.appThreadId ||
+                subagent.task.status !== "running" ||
+                liveQuery.subagentsFromEarlierProcesses.has(subagent)
+              ) {
+                return false;
+              }
+              taskId = nativeItemId;
+            } else {
+              for (const [candidateTaskId, candidateToolUseId] of yield* Ref.get(
+                toolUseIdsByTaskId,
+              )) {
+                if (candidateToolUseId === nativeItemId) {
+                  taskId = candidateTaskId;
+                }
+              }
+              if (taskId === undefined) {
+                const roster = rosterForNativeThread(
+                  yield* Ref.get(pendingBackgroundTasksByNativeThread),
+                  liveQuery.nativeThreadId,
+                );
+                for (const [candidateTaskId, task] of roster) {
+                  if (task.nativeItemId === nativeItemId) {
+                    taskId = candidateTaskId;
+                    break;
+                  }
+                }
+              }
+            }
+            if (taskId === undefined) {
+              return false;
+            }
+            yield* liveQuery.query.stopTask(taskId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Stop tool call request failed",
+                    cause,
+                  }),
+              ),
+            );
+            return true;
+          }),
           stopTask: Effect.fn("ClaudeAdapterV2.stopTask")(function* ({ providerThread, taskId }) {
             const liveQuery = yield* Ref.get(queryContext);
             const task = (yield* Ref.get(sessionSubagentsByTaskId)).get(taskId);

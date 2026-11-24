@@ -48,8 +48,8 @@ import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
-// fork: Move to background RPC for one tool call.
-import { WsForkMoveToolCallToBackgroundRpc } from "./forkToolCall.ts";
+// fork: Move to background and stop RPCs for one tool call.
+import { WsForkMoveToolCallToBackgroundRpc, WsForkStopToolCallRpc } from "./forkToolCall.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -2620,6 +2620,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
-  // fork: Move to background RPC for one tool call.
+  // fork: Move to background and stop RPCs for one tool call.
   WsForkMoveToolCallToBackgroundRpc,
+  WsForkStopToolCallRpc,
 ).middleware(RpcScopeAuthorization);
