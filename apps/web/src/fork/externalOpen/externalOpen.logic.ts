@@ -1,3 +1,4 @@
+/* oxlint-disable t3code/no-untranslated-copy -- fork-only English copy */
 import { resolvePathLinkTarget, splitFilePathPosition } from "@t3tools/shared/fileLinks";
 import { isAbsolutePath } from "@t3tools/shared/path";
 import * as Schema from "effect/Schema";
@@ -41,6 +42,46 @@ export function isMailtoUrl(rawUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function isSafeHttpBrowserUrl(rawUrl: string): boolean {
+  return isSafeExternalBrowserUrl(rawUrl) && !isMailtoUrl(rawUrl);
+}
+
+export type ForkAlternateOpenMenuEntry =
+  | { readonly action: "app"; readonly label: "Open in T3" }
+  | { readonly action: "external"; readonly label: "Open externally" };
+
+export type ResolveForkAlternateOpenMenuEntryInput =
+  | {
+      readonly kind: "file";
+      readonly setting: ForkOpenFilesIn;
+      readonly canOpenLocally: boolean;
+      readonly canOpenInApp: boolean;
+    }
+  | {
+      readonly kind: "link";
+      readonly setting: ForkOpenLinksIn;
+      readonly canOpenExternally: boolean;
+      readonly canOpenInApp: boolean;
+    };
+
+export function resolveForkAlternateOpenMenuEntry(
+  input: ResolveForkAlternateOpenMenuEntryInput,
+): ForkAlternateOpenMenuEntry | null {
+  if (input.kind === "file") {
+    if (!input.canOpenLocally) return null;
+    if (input.setting === "external") {
+      return input.canOpenInApp ? { action: "app", label: "Open in T3" } : null;
+    }
+    return { action: "external", label: "Open externally" };
+  }
+
+  if (!input.canOpenExternally) return null;
+  if (input.setting === "system") {
+    return input.canOpenInApp ? { action: "app", label: "Open in T3" } : null;
+  }
+  return { action: "external", label: "Open externally" };
 }
 
 export function resolveForkLinkAction(input: {

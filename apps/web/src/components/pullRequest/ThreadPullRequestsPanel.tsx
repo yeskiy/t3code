@@ -26,9 +26,20 @@ import {
   COMPOSER_PULL_REQUEST_DRAG_TYPE,
   encodePullRequestDragPayload,
 } from "~/components/chat/composerMentionDrag";
+import { canOpenLinksInApp } from "~/browser/browserLinkTarget"; // fork: external open
+import { useOpenLink } from "~/browser/useOpenLink"; // fork: external open
+import {
+  openForkExternalBrowserUrl,
+  resolveForkLinkMenuEntry,
+  useForkOpenLinksIn,
+} from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { findProjectForChangeRequest } from "@t3tools/client-runtime/change-request-links";
-import { pullRequestLinkPanelTarget, useOpenPrLink } from "~/lib/openPullRequestLink";
+import {
+  pullRequestLinkPanelTarget,
+  useOpenChangeRequestLink,
+  useOpenPrLink,
+} from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { usePullRequestIntentPrefetch } from "./usePullRequestIntentPrefetch";
@@ -116,6 +127,9 @@ function LinkRowImpl({
   const gt = useGT();
   const resolve = useMessages();
   const openPrLink = useOpenPrLink(threadRef);
+  const openChangeRequest = useOpenChangeRequestLink(threadRef);
+  const openLink = useOpenLink(threadRef);
+  const [openLinksIn] = useForkOpenLinksIn();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const menuAnchor = menuPosition
@@ -143,6 +157,12 @@ function LinkRowImpl({
       : null;
   const hasQuickActions =
     actionEntry !== null && pullRequestQuickActions(actionEntry, linkHostActions).length > 0;
+  // fork: show the single alternate open entry ("Open in T3" or "Open externally").
+  const forkOpenEntry = resolveForkLinkMenuEntry({
+    url: link.url,
+    setting: openLinksIn,
+    canOpenInApp: true,
+  });
   return (
     <div
       className={cn(PULL_REQUEST_ROW_CLASS, "relative hover:bg-accent/60")}
@@ -368,9 +388,28 @@ function LinkRowImpl({
               <LinkIcon className="size-3.5" />
               <T>Copy link</T>
             </MenuItem>
-            <MenuItem onClick={(event) => openPrLink(event, link.url, threadRef)}>
+            <MenuItem
+              onClick={(event) => {
+                if (forkOpenEntry?.action === "app") {
+                  if (
+                    !openChangeRequest(event, link.url, threadRef, undefined, undefined, {
+                      forceInApp: true,
+                    }) &&
+                    canOpenLinksInApp(threadRef)
+                  ) {
+                    void openLink(link.url, { target: "app" }).catch(console.error);
+                  }
+                  return;
+                }
+                if (forkOpenEntry?.action === "external") {
+                  void openForkExternalBrowserUrl(link.url).catch(console.error);
+                  return;
+                }
+                openPrLink(event, link.url, threadRef);
+              }}
+            >
               <ArrowUpRightIcon className="size-3.5" />
-              <T context="verb, open a link">Open</T>
+              {forkOpenEntry ? forkOpenEntry.label : <T context="verb, open a link">Open</T>}
             </MenuItem>
             {onSetWatching !== null && open && (watching || canStartWatch) ? (
               <MenuItem onClick={() => onSetWatching(link, !watching)}>

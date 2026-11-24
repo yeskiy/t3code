@@ -56,6 +56,8 @@ interface FileBrowserPanelProps {
   selectedPath: string | null;
   selectedPathRevealId: number;
   onOpenFile: (relativePath: string) => void;
+  // fork: direct in-app viewer open for the "Open in T3" row menu entry.
+  onOpenFileInApp?: ((relativePath: string) => void) | undefined;
   /** Host-folder entries use absolute paths. Avoid full traversal: disable expand-all and search only
    * loaded folders. */
   hostFolder?: boolean;
@@ -162,6 +164,7 @@ export default function FileBrowserPanel({
   selectedPath,
   selectedPathRevealId,
   onOpenFile,
+  onOpenFileInApp,
   onRefreshSelectedFile,
   workspaceMutationId,
   hostFolder = false,
@@ -220,7 +223,18 @@ export default function FileBrowserPanel({
       const position = pointerIsFresh
         ? { x: pointer.x, y: pointer.y }
         : { x: anchorRect.left, y: anchorRect.bottom };
-      const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
+      // fork: pass file/directory kind and in-app viewer callback for the alternate open menu entry.
+      const isDirectory =
+        item.path.endsWith("/") || entryKindsRef.current.get(relativePath) === "directory";
+      const fileTarget = {
+        environmentId,
+        filePath: relativePath,
+        workspaceRoot: cwd,
+        isDirectory,
+        ...(!isDirectory && onOpenFileInApp
+          ? { onOpenInApp: () => onOpenFileInApp(panelPath(relativePath)) }
+          : {}),
+      };
       const fileMenuItems = fileContextMenu.buildItems(fileTarget);
       // The app menu owns focus; the tree's outside-click handler would dismiss it before click.
       context.close({ restoreFocus: !pointerIsFresh });

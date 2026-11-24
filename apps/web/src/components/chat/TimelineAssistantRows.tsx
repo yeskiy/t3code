@@ -20,7 +20,9 @@ import {
   turnChanges,
   turnHasChanges,
 } from "@t3tools/client-runtime/state/thread-repositories";
+import { resolveDiffPathForWorkspace } from "../../diffFileActions"; // fork: external open
 import { useFileContextMenuHandler } from "../../fileContextMenu";
+import { useRightPanelStore } from "~/rightPanelStore"; // fork: external open
 import {
   readResponseSubagents,
   useAssistantMessageText,
@@ -541,17 +543,34 @@ function AssistantChangedFilesSectionInner({
       onOpenTurnDiff={onOpenTurnDiff}
       onFileContextMenu={(filePath, event, group) => {
         const repositoryCwd = group && repositoryCwdByGroupKey.get(group.key);
+        const resolvedRepositoryRoot =
+          repositoryRoot ??
+          (thread?.worktreePath == null ? activeProject?.repositoryIdentity?.rootPath : undefined);
+        // fork: wire in-app T3 viewer callback for the alternate open menu entry.
+        const inAppWorkspacePath =
+          repositoryCwd !== undefined || ctx.threadRef === null
+            ? null
+            : resolveDiffPathForWorkspace({
+                filePath,
+                workspaceRoot: ctx.workspaceRoot,
+                repositoryRoot: resolvedRepositoryRoot,
+              });
+        const onOpenInApp =
+          inAppWorkspacePath !== null && ctx.threadRef !== null
+            ? () => {
+                if (ctx.threadRef) {
+                  useRightPanelStore.getState().openFile(ctx.threadRef, inAppWorkspacePath);
+                }
+              }
+            : undefined;
         onFileContextMenu(
           repositoryCwd === undefined
             ? {
                 environmentId: ctx.activeThreadEnvironmentId,
                 filePath,
                 workspaceRoot: ctx.workspaceRoot,
-                repositoryRoot:
-                  repositoryRoot ??
-                  (thread?.worktreePath == null
-                    ? activeProject?.repositoryIdentity?.rootPath
-                    : undefined),
+                repositoryRoot: resolvedRepositoryRoot,
+                onOpenInApp,
               }
             : {
                 environmentId: ctx.activeThreadEnvironmentId,

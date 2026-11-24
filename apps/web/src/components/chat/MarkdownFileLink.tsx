@@ -12,6 +12,7 @@ import { useGT } from "gt-react";
 import { FolderIcon } from "lucide-react";
 
 import { contextMenuSourceOf } from "../../contextMenuSource";
+import { resolveForkFileMenuEntry } from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
@@ -46,6 +47,7 @@ interface MarkdownFileLinkProps {
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   // fork: open local file in OS default app unless Alt is held or setting is T3 viewer.
   onOpenExternalFile?: ((altKey: boolean, fallback: () => void) => void) | undefined;
+  onOpenExternalFileDirect?: (() => void) | undefined;
   resolveDragPath: () => Promise<string>;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
   openInEditorMenuLabel: string;
@@ -73,6 +75,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpen,
   onOpenInPanel,
   onOpenExternalFile, // fork: external open
+  onOpenExternalFileDirect, // fork: external open
   openInEditorMenuLabel,
   onOpenInBrowser,
   onOpenMedia,
@@ -250,6 +253,28 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     });
   };
 
+  const canOpenInEditor = onOpen !== undefined;
+  const canOpenInBrowser = onOpenInBrowser !== undefined;
+  const canOpenInPanel = threadRef !== undefined && Boolean(panelPath);
+  const hasPrimaryAction = hasMarkdownFilePrimaryAction({
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
+    canOpenMedia: onOpenMedia !== undefined,
+  });
+  const useBrowserPrimaryAction = shouldUseMarkdownFileBrowserPrimaryAction({
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
+  });
+  const openInAppFallback = () => {
+    if (useBrowserPrimaryAction) {
+      handleOpenInBrowser();
+      return;
+    }
+    handleOpenInFilePreview();
+  };
+
   const showFileContextMenu = async (
     position: { x: number; y: number },
     source: ContextMenuSource,
@@ -259,8 +284,24 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
     try {
       const copyItems = markdownFileCopyMenuItems({ targetPath, workspaceRelativePath });
+      // fork: add the single alternate open entry ("Open in T3" or "Open externally") on local hosts.
+      const canOpenInT3 = canOpenInPanel || onOpenMedia !== undefined || canOpenInBrowser;
+      const forkOpenEntry =
+        !isAppBundle && onOpenExternalFileDirect
+          ? resolveForkFileMenuEntry({ environmentId, canOpenInApp: canOpenInT3 })
+          : null;
+      const forkOpenItem =
+        forkOpenEntry === null
+          ? []
+          : ([
+              {
+                id: forkOpenEntry.action === "app" ? "fork-open-in-t3" : "fork-open-external",
+                label: forkOpenEntry.label,
+              },
+            ] as const);
       const clicked = await api.contextMenu.show(
         [
+          ...forkOpenItem,
           ...(onOpenMedia ? ([{ id: "preview-media", label: gt("Preview media") }] as const) : []),
           ...(onOpen ? ([{ id: "open", label: openInEditorMenuLabel }] as const) : []),
           ...(onOpenInBrowser
@@ -273,6 +314,14 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         source,
       );
 
+      if (clicked === "fork-open-in-t3") {
+        openInAppFallback();
+        return;
+      }
+      if (clicked === "fork-open-external") {
+        onOpenExternalFileDirect?.();
+        return;
+      }
       if (clicked === "preview-media") {
         onOpenMedia?.();
         return;
@@ -319,20 +368,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     void showFileContextMenu(position, contextMenuSourceOf(event));
   };
 
-  const canOpenInEditor = onOpen !== undefined;
-  const canOpenInBrowser = onOpenInBrowser !== undefined;
-  const canOpenInPanel = threadRef !== undefined && Boolean(panelPath);
-  const hasPrimaryAction = hasMarkdownFilePrimaryAction({
-    canOpenInEditor,
-    canOpenInBrowser,
-    canOpenInPanel,
-    canOpenMedia: onOpenMedia !== undefined,
-  });
-  const useBrowserPrimaryAction = shouldUseMarkdownFileBrowserPrimaryAction({
-    canOpenInEditor,
-    canOpenInBrowser,
-    canOpenInPanel,
-  });
   const chipKind = documentChipKindForFileName(iconPath) ?? "mention";
 
   return (
@@ -355,13 +390,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                   return;
                 }
                 // fork: open local file in OS default app when configured (Alt-click opens in T3 viewer).
-                const openInAppFallback = () => {
-                  if (useBrowserPrimaryAction) {
-                    handleOpenInBrowser();
-                    return;
-                  }
-                  handleOpenInFilePreview();
-                };
                 if (onOpenExternalFile) {
                   onOpenExternalFile(event.altKey, openInAppFallback);
                   return;
@@ -437,6 +465,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.onOpen === next.onOpen &&
     previous.onOpenInPanel === next.onOpenInPanel &&
     previous.onOpenExternalFile === next.onOpenExternalFile && // fork: external open
+    previous.onOpenExternalFileDirect === next.onOpenExternalFileDirect && // fork: external open
     previous.openInEditorMenuLabel === next.openInEditorMenuLabel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onOpenMedia === next.onOpenMedia &&

@@ -1,6 +1,11 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { msg } from "gt-react";
 
+import {
+  type ForkAlternateOpenMenuEntry,
+  isSafeExternalBrowserUrl,
+} from "~/fork/externalOpen/externalOpen.logic"; // fork: external open
+import { resolveForkLinkMenuEntry } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { m } from "../../i18n/messages";
 
 type ExternalLinkContextMenuAction =
@@ -32,15 +37,35 @@ const EXTERNAL_LINK_CONTEXT_MENU_ITEMS = [
   { id: "copy-link", label: msg("Copy Link") },
 ] as const satisfies readonly ContextMenuItem<ExternalLinkContextMenuAction>[];
 
-function externalLinkContextMenuItems(options: {
+export function externalLinkContextMenuItems(options: {
+  readonly href?: string | undefined;
   readonly canOpenInPreview: boolean;
+  readonly forkOpenEntry?: ForkAlternateOpenMenuEntry | null | undefined;
   readonly threadLinkAction?: "link-to-thread" | "unlink-from-thread" | undefined;
 }): readonly ContextMenuItem<ExternalLinkContextMenuAction>[] {
-  const items = (
-    options.canOpenInPreview
-      ? EXTERNAL_LINK_CONTEXT_MENU_ITEMS
-      : EXTERNAL_LINK_CONTEXT_MENU_ITEMS.filter((item) => item.id !== "open-in-preview")
-  ).map((item) => ({ id: item.id, label: m(item.label) }));
+  // fork: show only the single alternate open entry ("Open in T3" or "Open externally").
+  const forkOpenEntry =
+    options.forkOpenEntry !== undefined
+      ? options.forkOpenEntry
+      : options.href !== undefined
+        ? resolveForkLinkMenuEntry({
+            url: options.href,
+            canOpenInApp: options.canOpenInPreview,
+          })
+        : null;
+  const items: ContextMenuItem<ExternalLinkContextMenuAction>[] =
+    forkOpenEntry !== null
+      ? [
+          {
+            id: forkOpenEntry.action === "app" ? "open-in-preview" : "open-external",
+            label: forkOpenEntry.label,
+          },
+          { id: "copy-link", label: m(msg("Copy Link")) },
+        ]
+      : (options.canOpenInPreview
+          ? EXTERNAL_LINK_CONTEXT_MENU_ITEMS
+          : EXTERNAL_LINK_CONTEXT_MENU_ITEMS.filter((item) => item.id !== "open-in-preview")
+        ).map((item) => ({ id: item.id, label: m(item.label) }));
   if (options.threadLinkAction === undefined) return items;
   return [
     {
@@ -107,7 +132,7 @@ export async function showExternalLinkContextMenu({
   let action: ExternalLinkContextMenuAction | null;
   try {
     action = await showContextMenu(
-      externalLinkContextMenuItems({ canOpenInPreview, threadLinkAction }),
+      externalLinkContextMenuItems({ href, canOpenInPreview, threadLinkAction }),
       position,
     );
   } catch (cause) {
@@ -119,7 +144,9 @@ export async function showExternalLinkContextMenu({
     if (action === "open-in-preview") {
       await openInPreview(href);
     } else if (action === "open-external") {
-      await openExternal(href);
+      if (isSafeExternalBrowserUrl(href)) {
+        await openExternal(href);
+      }
     } else if (action === "copy-link") {
       await copyLink(href);
     } else if (action === "link-to-thread" || action === "unlink-from-thread") {

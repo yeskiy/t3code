@@ -8,6 +8,7 @@ import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
+import { isSafeExternalBrowserUrl } from "~/fork/externalOpen/externalOpen.logic"; // fork: external open
 import {
   canOpenLinksInApp,
   resolveBrowserLinkTargetPreference,
@@ -29,17 +30,21 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       readonly button?: number | undefined;
     };
     readonly threadRef?: ScopedThreadRef | undefined;
+    // fork: allow explicit menu items ("Open in T3" / "Open externally") to force target.
+    readonly target?: "app" | "system" | undefined;
   },
 ) => Promise<void> {
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   return async (url, options = {}) => {
     const targetThreadRef = options.threadRef ?? threadRef;
-    const target = resolveLinkTarget({
-      url,
-      event: options.event ?? NO_MODIFIER,
-      preference: await resolveBrowserLinkTargetPreference(),
-      canOpenInApp: canOpenLinksInApp(targetThreadRef),
-    });
+    const target =
+      options.target ??
+      resolveLinkTarget({
+        url,
+        event: options.event ?? NO_MODIFIER,
+        preference: await resolveBrowserLinkTargetPreference(),
+        canOpenInApp: canOpenLinksInApp(targetThreadRef),
+      });
     if (target === "app" && targetThreadRef) {
       const result = await openUrlInPreview({ threadRef: targetThreadRef, url, openPreview });
       if (isAtomCommandInterrupted(result)) return;
@@ -51,6 +56,7 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       if (isBrowserSettingsReadError(failure)) throw failure;
       console.error(result.cause);
     }
+    if (!isSafeExternalBrowserUrl(url)) return;
     const api = readLocalApi();
     if (!api) throw new Error(m(msg("Link opening is unavailable.")));
     await api.shell.openExternal(url);

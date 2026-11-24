@@ -22,6 +22,12 @@ import { msg } from "gt-react";
 import { useRef, useState, type ReactElement } from "react";
 
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
+import {
+  openForkExternalBrowserUrl,
+  openForkFileDirect,
+  resolveForkFileMenuEntry,
+  resolveForkLinkMenuEntry,
+} from "../../fork/externalOpen/forkExternalOpen"; // fork: external open
 import { readLocalApi } from "../../localApi";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { assetEnvironment } from "../../state/assets";
@@ -40,7 +46,11 @@ export interface MediaActionSource {
   readonly reference?: MediaReference;
   readonly asset?: { readonly environmentId: EnvironmentId; readonly resource: AssetResource };
   readonly onOpenFile?: () => void;
+  // fork: in-app opener for web URL media ("Open in T3" when Open links in is System browser).
+  readonly onOpenInApp?: () => void;
 }
+
+type MediaMenuActionId = MediaActionId | "fork-open-external" | "fork-open-in-t3";
 
 function mediaFileName(source: MediaActionSource): string {
   return (
@@ -144,7 +154,7 @@ export function MediaActions({
         typeof navigator !== "undefined" &&
         Boolean(navigator.clipboard?.write) &&
         typeof ClipboardItem !== "undefined";
-      const items: ContextMenuItem<MediaActionId>[] = [];
+      const items: ContextMenuItem<MediaMenuActionId>[] = [];
       if (reference?.kind === "file") {
         items.push({ id: "copy-full-path", label: m(msg("Copy full path")) });
         if (reference.relativePath)
@@ -152,12 +162,50 @@ export function MediaActions({
       } else if (reference?.kind === "url") {
         items.push({ id: "copy-url", label: m(msg("Copy URL")) });
       }
-      if (source.onOpenFile)
+      // fork: offer the single alternate open action ("Open in T3" or "Open externally").
+      const hostEnvironmentId =
+        source.asset &&
+        (source.asset.resource._tag === "workspace-file" ||
+          source.asset.resource._tag === "media-file")
+          ? source.asset.environmentId
+          : null;
+      const forkFileEntry =
+        reference?.kind === "file"
+          ? resolveForkFileMenuEntry({
+              environmentId: hostEnvironmentId,
+              canOpenInApp: source.onOpenFile !== undefined || source.onOpenInApp !== undefined,
+            })
+          : null;
+      const forkLinkEntry =
+        reference?.kind === "url"
+          ? resolveForkLinkMenuEntry({
+              url: reference.url,
+              canOpenInApp: source.onOpenInApp !== undefined,
+            })
+          : null;
+      if (forkFileEntry !== null) {
+        items.push({
+          id:
+            forkFileEntry.action === "app"
+              ? source.onOpenFile
+                ? "open-file"
+                : "fork-open-in-t3"
+              : "fork-open-external",
+          label: forkFileEntry.label,
+          disabled: !canReadMedia,
+        });
+      } else if (forkLinkEntry !== null) {
+        items.push({
+          id: forkLinkEntry.action === "app" ? "fork-open-in-t3" : "fork-open-external",
+          label: forkLinkEntry.label,
+        });
+      } else if (source.onOpenFile) {
         items.push({
           id: "open-file",
           label: m(msg("Open in file viewer")),
           disabled: !canReadMedia,
         });
+      }
       items.push({
         id: "save",
         label: isImage ? m(msg("Save image")) : m(msg("Save video")),
@@ -182,13 +230,15 @@ export function MediaActions({
               ? m(msg("Could not copy url"))
               : action === "open-file"
                 ? m(msg("Could not open in file viewer"))
-                : action === "save"
-                  ? isImage
-                    ? m(msg("Could not save image"))
-                    : m(msg("Could not save video"))
-                  : action === "copy-image"
-                    ? m(msg("Could not copy image"))
-                    : m(msg("Could not complete media action"));
+                : action === "fork-open-external" || action === "fork-open-in-t3"
+                  ? m(msg("Could not complete media action"))
+                  : action === "save"
+                    ? isImage
+                      ? m(msg("Could not save image"))
+                      : m(msg("Could not save video"))
+                    : action === "copy-image"
+                      ? m(msg("Could not copy image"))
+                      : m(msg("Could not complete media action"));
       const text =
         action === "copy-full-path" && reference?.kind === "file"
           ? reference.path
@@ -217,6 +267,21 @@ export function MediaActions({
       } else if (action === "open-file") {
         assertCanReadMedia();
         source.onOpenFile?.();
+      } else if (action === "fork-open-in-t3") {
+        if (reference?.kind === "file") {
+          assertCanReadMedia();
+        }
+        source.onOpenInApp?.();
+      } else if (action === "fork-open-external") {
+        if (reference?.kind === "file") {
+          assertCanReadMedia();
+          await openForkFileDirect({
+            environmentId: hostEnvironmentId,
+            path: reference.path,
+          });
+        } else if (reference?.kind === "url") {
+          await openForkExternalBrowserUrl(reference.url);
+        }
       } else if (action === "save" || action === "copy-image") {
         progressToast = toastManager.add({
           type: "loading",

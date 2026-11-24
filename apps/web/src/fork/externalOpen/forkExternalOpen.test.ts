@@ -12,7 +12,10 @@ vi.mock("~/components/ui/toast", () => ({
 
 import { FORK_OPEN_FILES_IN_KEY, FORK_OPEN_LINKS_IN_KEY } from "./externalOpen.logic";
 import {
+  openForkFileDirect,
   openForkFileOrFallback,
+  resolveForkFileMenuEntry,
+  resolveForkLinkMenuEntry,
   shouldForkInterceptInAppLink,
   shouldForkOpenLocalFile,
 } from "./forkExternalOpen";
@@ -178,5 +181,63 @@ describe("openForkFileOrFallback", () => {
 
     memoryStorage.setItem(FORK_OPEN_LINKS_IN_KEY, JSON.stringify("app"));
     expect(shouldForkInterceptInAppLink()).toBe(true);
+  });
+
+  it("opens local files directly even when Open files in is set to app", async () => {
+    memoryStorage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+    const forkOpenPath = vi.fn(async () => ({ ok: true as const }));
+    (window as unknown as { desktopBridge?: unknown }).desktopBridge = { forkOpenPath };
+
+    const opened = await openForkFileDirect({
+      environmentId: ENV_ID,
+      path: "docs/report.html",
+      cwd: "E:\\Projects\\repo",
+    });
+
+    expect(opened).toBe(true);
+    expect(forkOpenPath).toHaveBeenCalledWith({
+      environmentId: ENV_ID,
+      path: "E:\\Projects\\repo\\docs\\report.html",
+    });
+  });
+
+  it("resolves alternate file menu entries based on setting and desktop host availability", () => {
+    expect(resolveForkFileMenuEntry({ environmentId: ENV_ID, canOpenInApp: true })).toBeNull();
+
+    (window as unknown as { desktopBridge?: unknown }).desktopBridge = {
+      forkOpenPath: vi.fn(async () => ({ ok: true as const })),
+    };
+    expect(resolveForkFileMenuEntry({ environmentId: ENV_ID, canOpenInApp: true })).toEqual({
+      action: "app",
+      label: "Open in T3",
+    });
+
+    memoryStorage.setItem(FORK_OPEN_FILES_IN_KEY, JSON.stringify("app"));
+    expect(resolveForkFileMenuEntry({ environmentId: ENV_ID, canOpenInApp: true })).toEqual({
+      action: "external",
+      label: "Open externally",
+    });
+  });
+
+  it("resolves alternate link menu entries for http(s) URLs and rejects mailto/unsafe schemes", () => {
+    expect(
+      resolveForkLinkMenuEntry({ url: "https://example.com/pr/1", canOpenInApp: true }),
+    ).toEqual({
+      action: "app",
+      label: "Open in T3",
+    });
+
+    memoryStorage.setItem(FORK_OPEN_LINKS_IN_KEY, JSON.stringify("app"));
+    expect(
+      resolveForkLinkMenuEntry({ url: "https://example.com/pr/1", canOpenInApp: true }),
+    ).toEqual({
+      action: "external",
+      label: "Open externally",
+    });
+
+    expect(
+      resolveForkLinkMenuEntry({ url: "mailto:owner@example.com", canOpenInApp: true }),
+    ).toBeNull();
+    expect(resolveForkLinkMenuEntry({ url: "javascript:alert(1)", canOpenInApp: true })).toBeNull();
   });
 });

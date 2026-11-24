@@ -13,7 +13,10 @@ import {
   FORK_OPEN_LINKS_IN_KEY,
   ForkOpenFilesIn,
   ForkOpenLinksIn,
+  type ForkAlternateOpenMenuEntry,
   isSafeExternalBrowserUrl,
+  isSafeHttpBrowserUrl,
+  resolveForkAlternateOpenMenuEntry,
   resolveForkFileAction,
   resolveLocalFileAbsolutePath,
   shouldInterceptInAppLink,
@@ -45,6 +48,32 @@ function canForkOpenLocalFile(environmentId: EnvironmentId | null): boolean {
   return hostEnvironmentId === null || hostEnvironmentId === environmentId;
 }
 
+export function resolveForkFileMenuEntry(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly canOpenInApp: boolean;
+  readonly setting?: ForkOpenFilesIn;
+}): ForkAlternateOpenMenuEntry | null {
+  return resolveForkAlternateOpenMenuEntry({
+    kind: "file",
+    setting: input.setting ?? readForkOpenFilesIn(),
+    canOpenLocally: canForkOpenLocalFile(input.environmentId),
+    canOpenInApp: input.canOpenInApp,
+  });
+}
+
+export function resolveForkLinkMenuEntry(input: {
+  readonly url: string;
+  readonly canOpenInApp: boolean;
+  readonly setting?: ForkOpenLinksIn;
+}): ForkAlternateOpenMenuEntry | null {
+  return resolveForkAlternateOpenMenuEntry({
+    kind: "link",
+    setting: input.setting ?? readForkOpenLinksIn(),
+    canOpenExternally: isSafeHttpBrowserUrl(input.url),
+    canOpenInApp: input.canOpenInApp,
+  });
+}
+
 export async function openForkExternalBrowserUrl(url: string): Promise<boolean> {
   if (!isSafeExternalBrowserUrl(url)) return false;
   const api = readLocalApi();
@@ -67,31 +96,25 @@ export function shouldForkOpenLocalFile(input: {
 }
 
 /**
- * Opens a local file in its OS default app when the fork setting is "external".
- * Returns true when this helper handled the click (opened or reported a local error),
- * and false when it ran `fallback` to open the file inside T3 Code instead.
+ * Opens a local file directly in its OS default app via the checked fork IPC,
+ * ignoring the "Open files in" setting (used by explicit "Open externally" menu items).
  */
-export async function openForkFileOrFallback(input: {
+export async function openForkFileDirect(input: {
   readonly environmentId: EnvironmentId | null;
   readonly path: string;
   readonly cwd?: string | undefined;
-  readonly altKey?: boolean;
-  readonly fallback: () => void;
 }): Promise<boolean> {
-  if (!shouldForkOpenLocalFile(input) || input.environmentId === null) {
-    input.fallback();
+  if (input.environmentId === null || !canForkOpenLocalFile(input.environmentId)) {
     return false;
   }
 
   const absolutePath = resolveLocalFileAbsolutePath({ path: input.path, cwd: input.cwd });
   if (absolutePath === null) {
-    input.fallback();
     return false;
   }
 
   const openPath = window.desktopBridge?.forkOpenPath;
   if (openPath === undefined) {
-    input.fallback();
     return false;
   }
 
@@ -99,7 +122,6 @@ export async function openForkFileOrFallback(input: {
     const result = await openPath({ environmentId: input.environmentId, path: absolutePath });
     if (result.ok) return true;
     if (result.reason === "not-host-environment") {
-      input.fallback();
       return false;
     }
     toastManager.add(
@@ -120,4 +142,33 @@ export async function openForkFileOrFallback(input: {
     );
     return true;
   }
+}
+
+/**
+ * Opens a local file in its OS default app when the fork setting is "external".
+ * Returns true when this helper handled the click (opened or reported a local error),
+ * and false when it ran `fallback` to open the file inside T3 Code instead.
+ */
+export async function openForkFileOrFallback(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly path: string;
+  readonly cwd?: string | undefined;
+  readonly altKey?: boolean;
+  readonly fallback: () => void;
+}): Promise<boolean> {
+  if (!shouldForkOpenLocalFile(input) || input.environmentId === null) {
+    input.fallback();
+    return false;
+  }
+
+  const handled = await openForkFileDirect({
+    environmentId: input.environmentId,
+    path: input.path,
+    cwd: input.cwd,
+  });
+  if (!handled) {
+    input.fallback();
+    return false;
+  }
+  return true;
 }

@@ -152,6 +152,7 @@ function PullRequestRowImpl({
                   url: entry.url,
                   openLabel: openOnHostLabel(sourceControlClients.get(entry.provider)),
                   position: { x: event.clientX, y: event.clientY },
+                  onOpenInApp: () => onSelect(entry), // fork: external open
                 });
               }}
             >

@@ -4,6 +4,7 @@ import { T, useGT } from "gt-react";
 import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
+import { canOpenLinksInApp } from "~/browser/browserLinkTarget"; // fork: external open
 import { useOpenLink } from "~/browser/useOpenLink";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -20,13 +21,18 @@ interface CrumbsPullRequest {
   readonly title: string;
 }
 
-const openNumberContextMenu = (event: ReactMouseEvent, detail: CrumbsPullRequest): void => {
+const openNumberContextMenu = (
+  event: ReactMouseEvent,
+  detail: CrumbsPullRequest,
+  onOpenInApp?: () => Promise<void>,
+): void => {
   event.preventDefault();
   event.stopPropagation();
   void showPullRequestLinkContextMenu({
     url: detail.url,
     openLabel: openOnHostLabel(sourceControlClients.get(detail.provider)),
     position: { x: event.clientX, y: event.clientY },
+    onOpenInApp,
   });
 };
 
@@ -84,7 +90,15 @@ function NumberLink({
             onAuxClick={(event) => {
               if (event.button === 1) void openLink(detail.url, { event }).catch(console.error);
             }}
-            onContextMenu={(event) => openNumberContextMenu(event, detail)}
+            onContextMenu={(event) =>
+              openNumberContextMenu(
+                event,
+                detail,
+                threadRef && canOpenLinksInApp(threadRef)
+                  ? () => openLink(detail.url, { target: "app" })
+                  : undefined,
+              )
+            }
             className={cn(
               "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 hover:underline",
               toneClassName,

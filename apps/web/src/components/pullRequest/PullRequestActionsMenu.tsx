@@ -29,7 +29,9 @@ import {
 import { Branch, msg, T, useGT, useMessages } from "gt-react";
 import { useId, useState } from "react";
 
+import { canOpenLinksInApp } from "~/browser/browserLinkTarget"; // fork: external open
 import { useOpenLink } from "~/browser/useOpenLink";
+import { resolveForkLinkMenuEntry, useForkOpenLinksIn } from "~/fork/externalOpen/forkExternalOpen"; // fork: external open
 import { m } from "~/i18n/messages";
 
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -164,6 +166,12 @@ export function PullRequestActionsMenu({
 }) {
   const gt = useGT();
   const openLink = useOpenLink(threadRef);
+  const [openLinksIn] = useForkOpenLinksIn();
+  const forkOpenEntry = resolveForkLinkMenuEntry({
+    url: detail.url,
+    setting: openLinksIn,
+    canOpenInApp: canOpenLinksInApp(threadRef),
+  });
   const resolve = useMessages();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const inlineConfirm = useInlineActionConfirm(pullRequestKey);
@@ -437,9 +445,21 @@ export function PullRequestActionsMenu({
             ) : null}
           </>
         ) : null}
-        <MenuItem onClick={(event) => void openLink(detail.url, { event }).catch(console.error)}>
+        <MenuItem
+          onClick={(event) => {
+            if (forkOpenEntry?.action === "app") {
+              void openLink(detail.url, { target: "app" }).catch(console.error);
+              return;
+            }
+            if (forkOpenEntry?.action === "external") {
+              void openLink(detail.url, { target: "system" }).catch(console.error);
+              return;
+            }
+            void openLink(detail.url, { event }).catch(console.error);
+          }}
+        >
           <ArrowUpRightIcon className="size-3.5" />
-          {openOnHostText}
+          {forkOpenEntry ? forkOpenEntry.label : openOnHostText}
         </MenuItem>
         <MenuItem
           onClick={() =>
