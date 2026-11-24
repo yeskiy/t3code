@@ -63,6 +63,9 @@ interface ComposerPrimaryActionsProps {
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  // fork: stop-scope tooltip/aria-label and confirmation guard
+  stopLabel?: string | undefined;
+  stopRequiresConfirm?: boolean | undefined;
   compactBeforeSendTokens?: number | null;
   hideCompactToggle?: boolean;
   keepFullHistory?: boolean;
@@ -143,6 +146,8 @@ function StopGenerationButton({
   preserveComposerFocusOnPointerDown,
   onStopRequested,
   onInterrupt,
+  stopLabel,
+  stopRequiresConfirm = false,
 }: {
   stopPhase: StopPhase;
   canOperateThread: boolean;
@@ -150,6 +155,9 @@ function StopGenerationButton({
   preserveComposerFocusOnPointerDown: boolean;
   onStopRequested: () => void;
   onInterrupt: () => void;
+  // fork: stop-scope tooltip/aria-label and confirmation guard
+  stopLabel?: string | undefined;
+  stopRequiresConfirm?: boolean | undefined;
 }) {
   const gt = useGT();
   const isStopDisabled = stopPhase === "pending";
@@ -167,10 +175,13 @@ function StopGenerationButton({
             disabled={!canOperateThread || isStopDisabled}
             onClick={() => {
               if (!canOperateThread || isStopDisabled) return;
-              onStopRequested();
+              // fork: wait for confirmation before locking Stop into pending
+              if (!stopRequiresConfirm) onStopRequested();
               onInterrupt();
             }}
-            aria-label={stopPhase === "pending" ? gt("Stopping") : gt("Stop generation")}
+            aria-label={
+              stopPhase === "pending" ? gt("Stopping") : (stopLabel ?? gt("Stop generation"))
+            }
           />
         }
       >
@@ -181,7 +192,7 @@ function StopGenerationButton({
       <TooltipPopup>
         {stopPhase === "pending"
           ? gt("Stopping…")
-          : gt("Interrupt", { $context: "verb, stops the running agent" })}
+          : (stopLabel ?? gt("Interrupt", { $context: "verb, stops the running agent" }))}
       </TooltipPopup>
     </Tooltip>
   );
@@ -196,6 +207,8 @@ export function CollapsedComposerStopAction({
   hasSendableContent,
   isEditingQueuedMessage,
   onInterrupt,
+  stopLabel,
+  stopRequiresConfirm = false,
 }: {
   children: ReactNode;
   canOperateThread: boolean;
@@ -204,6 +217,9 @@ export function CollapsedComposerStopAction({
   hasSendableContent: boolean;
   isEditingQueuedMessage: boolean;
   onInterrupt: () => void;
+  // fork: stop-scope tooltip/aria-label and confirmation guard
+  stopLabel?: string | undefined;
+  stopRequiresConfirm?: boolean | undefined;
 }) {
   const [stopPhase, setStopPhase] = useStopPhase({ runId, canInterrupt, canOperateThread });
   if (
@@ -226,6 +242,8 @@ export function CollapsedComposerStopAction({
         preserveComposerFocusOnPointerDown
         onStopRequested={() => setStopPhase("pending")}
         onInterrupt={onInterrupt}
+        {...(stopLabel === undefined ? {} : { stopLabel })}
+        stopRequiresConfirm={stopRequiresConfirm}
       />
     </span>
   );
@@ -255,6 +273,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onResume,
   onPreviousPendingQuestion,
   onInterrupt,
+  stopLabel,
+  stopRequiresConfirm = false,
   compactBeforeSendTokens = null,
   hideCompactToggle = false,
   keepFullHistory = false,
@@ -289,6 +309,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       preserveComposerFocusOnPointerDown={preserveComposerFocusOnPointerDown}
       onStopRequested={() => setStopPhase("pending")}
       onInterrupt={onInterrupt}
+      {...(stopLabel === undefined ? {} : { stopLabel })}
+      stopRequiresConfirm={stopRequiresConfirm}
     />
   );
 

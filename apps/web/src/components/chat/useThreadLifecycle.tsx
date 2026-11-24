@@ -759,6 +759,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     workNow: runStop?.state === "stopping" ? runStopNow : backgroundWorkNow,
     childInputNow,
     goalNow,
+    handleStopBackgroundWorkStable, // fork: composer Stop confirm delegates full stop here
     handleSwitchCheckoutToThread,
     handleSwitchCheckoutToThreadStable,
     isRestoringThreadBranch,

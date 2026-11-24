@@ -71,6 +71,12 @@ import {
 } from "~/fork/toolCallBackground/useForkForegroundToolTracker";
 // fork: artifacts panel
 import { useForkArtifactsEnabled } from "~/fork/artifacts/forkArtifactsSetting";
+// fork: stop-scope confirmation and labels
+import { composerStopLabel, decideComposerStop } from "~/fork/stopScope/composerStop.logic";
+import {
+  ForkStopBackgroundConfirmHost,
+  openForkStopBackgroundConfirm,
+} from "~/fork/stopScope/ForkStopBackgroundConfirmHost";
 import { ChatBannerLane } from "./chat/ChatBannerLane";
 import * as Schema from "effect/Schema";
 import {
@@ -105,6 +111,7 @@ import {
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
   limitRecoveryOwnsSnooze,
+  threadRuntimeHasInterruptibleRun,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveWorkflowOpening,
@@ -1940,12 +1947,25 @@ export default function ChatView(props: ChatViewProps) {
     useComposerFocus(composerRef);
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
+  // fork: composer Stop distinguishes a live turn from surviving background work.
+  const composerStopState = {
+    turnRunning: threadRuntimeHasInterruptibleRun(activeRuntime),
+    backgroundCount: pendingBackgroundTasks.length,
+  };
+  const composerStopDecision = decideComposerStop(composerStopState);
+  const composerStopLabelText = composerStopLabel(composerStopState);
   const onInterrupt = async () => {
     if (
       !activeThread ||
       !readEnvironmentScope(activeThread.environmentId, AuthOrchestrationOperateScope)
     )
       return;
+    // fork: confirm before stopping background work when no turn is running.
+    if (composerStopDecision === "confirm-stop-all") {
+      openForkStopBackgroundConfirm(routeThreadKey);
+      return;
+    }
+    if (composerStopDecision === "none") return;
     // fork: composer Stop ends only the running turn; the Waiting strip Stop ends background work.
     const result = await interruptThreadTurn({
       environmentId,
@@ -2543,6 +2563,7 @@ export default function ChatView(props: ChatViewProps) {
     workNow,
     childInputNow,
     goalNow,
+    handleStopBackgroundWorkStable, // fork: composer Stop confirm delegates full stop here
     handleSwitchCheckoutToThread,
     handleSwitchCheckoutToThreadStable,
     isRestoringThreadBranch,
@@ -3921,6 +3942,10 @@ export default function ChatView(props: ChatViewProps) {
                                 onSend={onComposerSendStable}
                                 onResume={onComposerResumeStable}
                                 onInterrupt={onInterruptStable}
+                                {...(composerStopLabelText === undefined
+                                  ? {}
+                                  : { stopLabel: composerStopLabelText })}
+                                stopRequiresConfirm={composerStopDecision !== "stop-turn"}
                                 onSelectActivePendingUserInputOption={
                                   onSelectActivePendingUserInputOptionStable
                                 }
@@ -4234,6 +4259,14 @@ export default function ChatView(props: ChatViewProps) {
         projection={serverProjection}
         worktreePath={activeThread?.worktreePath ?? null}
         onConfirm={onConfirmRevertStable}
+      />
+      {/* fork: confirm before composer Stop ends surviving background work */}
+      <ForkStopBackgroundConfirmHost
+        threadKey={routeThreadKey}
+        tasks={pendingBackgroundTasks}
+        turnItems={serverProjection?.turnItems ?? EMPTY_TURN_ITEMS}
+        canOperateThread={canOperateThread}
+        onConfirm={() => void handleStopBackgroundWorkStable()}
       />
       {embedded ? null : <LinkPullRequestDialogHost />}
       <ThreadVisitWatermark threadRef={routeThreadRef} />
