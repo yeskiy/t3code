@@ -222,10 +222,8 @@ import {
   type ClaudeScopedLimitNames,
 } from "../../provider/claudeUsageLimits.ts";
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
-import {
-  T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
-  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+// fork: delegate-only bullet derives from T3_CODE_ORCHESTRATION_INSTRUCTIONS in forkOrchestrationInstructions.ts
+import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
@@ -255,6 +253,7 @@ import {
   type ForkClaudeLaunch,
   type ForkClaudeLaunchResolver,
 } from "../../fork/instanceLaunch/ForkClaudeLaunch.ts";
+import { forkOrchestrationInstructions } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
 import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
@@ -2747,7 +2746,8 @@ export function makeClaudeQueryOptions(input: {
         }) +
           (input.mcpServers === undefined
             ? ""
-            : T3_CODE_ORCHESTRATION_INSTRUCTIONS +
+            : // fork: delegate-only bullet when the instance disallows Agent
+              forkOrchestrationInstructions(input.forkLaunch?.nativeAgentOff === true) +
               CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
               CLAUDE_SEND_TO_USER_INSTRUCTIONS +
               (deviceInstructions

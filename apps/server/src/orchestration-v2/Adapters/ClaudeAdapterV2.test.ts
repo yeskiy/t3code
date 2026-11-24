@@ -123,6 +123,8 @@ import {
   PROVIDER_RETRY_BUDGET_MS,
 } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
+// fork: delegate-only instructions
+import { FORK_DELEGATE_ONLY_BULLET } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderInstallationGate from "../../provider/ProviderInstallationGate.ts";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
@@ -435,6 +437,40 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
         : "",
       "AGENT TEXT",
     );
+  });
+
+  // fork: delegate-only instructions
+  it("swaps the native subagent bullet when forkLaunch marks native Agent off", () => {
+    const mcpServers = { "t3-code": { type: "http" as const, url: "http://127.0.0.1/mcp" } };
+    const withAgentOff = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-delegate-only-off",
+      resume: false,
+      cwd: "/workspace",
+      mcpServers,
+      forkLaunch: { nativeAgentOff: true },
+    });
+    const offAppend =
+      typeof withAgentOff.systemPrompt === "object" && "append" in withAgentOff.systemPrompt
+        ? (withAgentOff.systemPrompt.append ?? "")
+        : "";
+    assert.include(offAppend, FORK_DELEGATE_ONLY_BULLET);
+    assert.notInclude(offAppend, "Claude `Agent`");
+
+    const withoutForkLaunch = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "fork-delegate-only-default",
+      resume: false,
+      cwd: "/workspace",
+      mcpServers,
+    });
+    const defaultAppend =
+      typeof withoutForkLaunch.systemPrompt === "object" &&
+      "append" in withoutForkLaunch.systemPrompt
+        ? (withoutForkLaunch.systemPrompt.append ?? "")
+        : "";
+    assert.include(defaultAppend, "Claude `Agent`");
+    assert.notInclude(defaultAppend, FORK_DELEGATE_ONLY_BULLET);
   });
 
   it("passes the thread's other folders and every --add-dir and --plugin-dir launch directory to Claude", () => {
