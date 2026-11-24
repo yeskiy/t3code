@@ -19,7 +19,9 @@ You can open the Artifacts panel in three ways:
 - **Default**: On (`true`)
 - **Storage key**: `t3code:fork:artifacts-panel:v1` (via `apps/web/src/hooks/useLocalStorage.ts`)
 
-Turning the setting off hides the Artifacts launcher entry, the inline open button, and the thread details row. If an Artifacts tab is already open, it shows an off state with a button to turn the setting back on.
+Turning the setting off hides the Artifacts launcher entry, the inline open button, the thread details row, and the **Artifacts** choice in **Show in thread details**. If an Artifacts tab is already open, it shows an off state with a button to turn the setting back on.
+
+When **Show renders as artifacts** is on, **Artifacts** also appears in **Settings -> Appearance -> Thread details** and in the thread details card right-click menu (on by default, stored under client setting `threadDetailsItems.artifacts`). Turning it off there hides only the thread details card row while keeping the right panel tab and inline open button available.
 
 ## Security model
 
@@ -41,7 +43,8 @@ Fork code lives in `apps/web/src/fork/artifacts/`:
 - `ForkArtifactsPanel.browser.test.tsx`: browser test covering empty state, newest-first list, strict sandbox attributes, back navigation, setting toggle, and inline open button.
 - `ForkArtifactsSettingRow.tsx`: Settings toggle row.
 - `ForkArtifactOpenButton.tsx`: hover action button on inline chat renders.
-- `ForkThreadDetailsArtifactsRow.tsx`: quick-open row with artifact count in the thread details card.
+- `ForkThreadDetailsArtifactsRow.tsx` / `ForkThreadDetailsArtifactsRow.browser.test.tsx`: quick-open row with artifact count in the thread details card, plus browser tests for **Show in thread details** visibility and toggling.
+- `forkThreadDetailsItems.ts` / `forkThreadDetailsItems.test.ts`: fork thread details item entry (`artifacts`) and filtering when **Show renders as artifacts** is off.
 
 Small `// fork:` hooks in upstream files:
 
@@ -52,7 +55,10 @@ Small `// fork:` hooks in upstream files:
 - `apps/web/src/components/chat/useRightPanelActions.ts`: exposes `addArtifactsSurfaceStable`.
 - `apps/web/src/components/ChatView.tsx`: wires the setting and `onAddArtifacts` into `ChatRightPanel`.
 - `apps/web/src/components/chat/HtmlRenderFrame.tsx`: renders `ForkArtifactOpenButton` beside full screen.
-- `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: renders `ForkThreadDetailsArtifactsRow` for server threads.
+- `apps/web/src/components/chat/threadDetailsItems.ts`: appends `FORK_THREAD_DETAILS_ITEMS` and allows filtering items in `isDefaultThreadDetailsVisibility`.
+- `apps/web/src/components/chat/ThreadDetailsItemsMenu.tsx`: filters the shared **Show in thread details** menu through `useForkThreadDetailsItems`.
+- `apps/web/src/components/settings/ThreadDetailsItemsRow.tsx`: filters the Settings -> Appearance -> Thread details count and reset state through `useForkThreadDetailsItems`.
+- `apps/web/src/components/chat/ThreadDetailsPanel.tsx`: filters `contentKey` through `useForkThreadDetailsItems` and gates `ForkThreadDetailsArtifactsRow` on `visible.artifacts`.
 - `apps/web/src/components/settings/SettingsPanels.tsx`: renders `ForkArtifactsSettingRow` under Display.
 
 ## Manual test checklist
@@ -63,4 +69,5 @@ Small `// fork:` hooks in upstream files:
 4. Click an artifact and confirm it renders full size in the panel, resizes when you drag or maximize the panel, and returns to the list on **Artifacts** back click.
 5. Hover an inline chat render and click **Open in artifacts panel** to jump straight to that render in the right panel.
 6. Open the thread details card and confirm the **Artifacts** row shows the count and opens the Artifacts tab.
-7. Turn **Show renders as artifacts** off in Settings and verify the launcher entry, hover button, and thread details row disappear, while inline chat renders stay visible.
+7. Open Settings -> Appearance -> Thread details (or right-click the thread details card), confirm **Artifacts** is checked by default, uncheck it, and verify the **Artifacts** row disappears from the thread details card while the right panel tab still works.
+8. Turn **Show renders as artifacts** off in Settings and verify the launcher entry, hover button, thread details row, and **Artifacts** choice in **Show in thread details** disappear, while inline chat renders stay visible.

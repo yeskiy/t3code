@@ -1,5 +1,6 @@
 import type { ClientSettings } from "@t3tools/contracts";
 import { msg } from "gt-react";
+import { FORK_THREAD_DETAILS_ITEMS } from "~/fork/artifacts/forkThreadDetailsItems"; // fork: artifacts panel
 
 // Ids are stored in client settings, so never rename one.
 export const THREAD_DETAILS_ITEMS = [
@@ -27,6 +28,7 @@ export const THREAD_DETAILS_ITEMS = [
   { id: "sideChats", label: msg("Side chats"), defaultVisible: true },
   { id: "usage", label: msg("Usage limits"), defaultVisible: false },
   { id: "context", label: msg("Context window"), defaultVisible: false },
+  ...FORK_THREAD_DETAILS_ITEMS, // fork: artifacts panel
 ] as const;
 
 export type ThreadDetailsItemId = (typeof THREAD_DETAILS_ITEMS)[number]["id"];
@@ -66,8 +68,11 @@ export function setThreadDetailsItem(
   return visible === defaultVisible(item, settings) ? rest : { ...rest, [item.id]: visible };
 }
 
-export function isDefaultThreadDetailsVisibility(visibility: ThreadDetailsVisibility) {
-  return THREAD_DETAILS_ITEMS.every((item) => visibility[item.id] === item.defaultVisible);
+export function isDefaultThreadDetailsVisibility(
+  visibility: ThreadDetailsVisibility,
+  items: readonly ThreadDetailsItem[] = THREAD_DETAILS_ITEMS, // fork: artifacts panel
+) {
+  return items.every((item) => visibility[item.id] === item.defaultVisible);
 }
 
 /** Also clears the retired Labs flag, so Usage and Context return to off. */
