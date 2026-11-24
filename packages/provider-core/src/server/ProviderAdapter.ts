@@ -814,6 +814,11 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly nativeItemId: string;
   }) => Effect.Effect<boolean, ProviderAdapterV2Error>;
+  /** Fork: stops one running tool call without ending the turn, by its turn item native id. */
+  readonly stopToolCall?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly nativeItemId: string;
+  }) => Effect.Effect<boolean, ProviderAdapterV2Error>;
   /**
    * Marks or unmarks background tasks the agent will resume from, using the ids the agent saw.
    * Ids not running on this provider thread come back unmatched and change nothing.

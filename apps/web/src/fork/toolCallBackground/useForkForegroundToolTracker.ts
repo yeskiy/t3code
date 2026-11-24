@@ -12,7 +12,7 @@ import {
   readForkMoveTarget,
   setForkMoveTarget,
 } from "./foregroundToolContext";
-import { forkMoveToolCallToBackground } from "./forkToolCallCommands";
+import { forkMoveToolCallToBackground, forkStopToolCall } from "./forkToolCallCommands";
 import {
   FORK_TOOL_BACKGROUND_KEY,
   ForkToolBackgroundEnabled,
@@ -52,6 +52,29 @@ export function useForkForegroundToolTracker(input: {
     setForkMoveTarget({ environmentId, threadId, itemId: itemId as TurnItemId });
     return () => setForkMoveTarget(null);
   }, [focused, environmentId, threadId, itemId]);
+}
+
+export function useForkStopToolCall() {
+  const stop = useAtomCommand(forkStopToolCall);
+  return async (target: ForkMoveTarget) => {
+    const result = await stop({
+      environmentId: target.environmentId,
+      input: { threadId: target.threadId, itemId: target.itemId },
+    });
+    if (result._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not stop the command" });
+    }
+  };
+}
+
+export function useForkStopToolCallShortcut() {
+  const stop = useForkStopToolCall();
+  return (event: KeyboardEvent): boolean => {
+    const target = readForkMoveTarget();
+    if (target === null) return false;
+    if (!event.repeat) void stop(target);
+    return true;
+  };
 }
 
 export function useForkMoveToBackgroundShortcut() {

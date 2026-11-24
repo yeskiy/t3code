@@ -63,10 +63,11 @@ import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./cha
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
 import { useWorktreeSetup } from "./chat/useWorktreeSetup";
 import { useChatShortcuts } from "./chat/useChatShortcuts";
-// fork: Move to background
+// fork: Move to background and stop running tool call
 import {
   useForkForegroundToolTracker,
   useForkMoveToBackgroundShortcut,
+  useForkStopToolCallShortcut,
 } from "~/fork/toolCallBackground/useForkForegroundToolTracker";
 // fork: artifacts panel
 import { useForkArtifactsEnabled } from "~/fork/artifacts/forkArtifactsSetting";
@@ -2875,6 +2876,7 @@ export default function ChatView(props: ChatViewProps) {
     focused: activeThreadId !== null && !embedded && !backgroundThread && canOperateThread,
   });
   const forkMoveToBackground = useForkMoveToBackgroundShortcut(); // fork: Move to background
+  const forkStopToolCall = useForkStopToolCallShortcut(); // fork: Stop running tool call
   useChatShortcuts({
     enabled: activeThreadId !== null && !backgroundThread,
     embedded,
@@ -2921,8 +2923,9 @@ export default function ChatView(props: ChatViewProps) {
         if (!canInterruptRunningThread) return false;
         if (!event.repeat) void onInterruptStable();
       },
-      // fork: Ctrl+B Move to background
+      // fork: Ctrl+B Move to background and bindable Stop running tool call
       "toolCall.moveToBackground": ({ event }) => forkMoveToBackground(event),
+      "toolCall.stop": ({ event }) => forkStopToolCall(event),
     },
     fallback: (command) => {
       const scriptId = projectScriptIdFromCommand(command);

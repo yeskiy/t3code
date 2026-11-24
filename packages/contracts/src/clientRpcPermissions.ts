@@ -84,8 +84,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
-  // fork: Move to background changes a running turn, as Stop does.
+  // fork: Move to background and stop change a running turn, as Stop does.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: AuthOrchestrationOperateScope,
+  [FORK_TOOL_CALL_WS_METHODS.stop]: AuthOrchestrationOperateScope,
   // Force stop kills agent processes, as Stop on a terminal does.
   [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: AuthOrchestrationOperateScope,
   // A guest link hands thread access to someone outside, like a pairing link.

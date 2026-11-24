@@ -7,3 +7,8 @@ export const forkMoveToolCallToBackground = createEnvironmentRpcCommand(connecti
   label: "environment-data:fork:move-tool-call-to-background",
   tag: FORK_TOOL_CALL_WS_METHODS.moveToBackground,
 });
+
+export const forkStopToolCall = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:fork:stop-tool-call",
+  tag: FORK_TOOL_CALL_WS_METHODS.stop,
+});

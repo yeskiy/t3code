@@ -18,8 +18,9 @@ const RPC_AGGREGATES = {
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: "orchestration",
-  // fork: Move to background RPC for one tool call.
+  // fork: Move to background and stop RPCs for one tool call.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: "orchestration",
+  [FORK_TOOL_CALL_WS_METHODS.stop]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: "orchestration",

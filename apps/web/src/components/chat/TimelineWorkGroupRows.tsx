@@ -62,6 +62,8 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+// fork: Move to background
+import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -605,84 +607,88 @@ export function LiveWorkEntryTimelineRow({
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
 
   return (
-    <button
-      type="button"
-      className={cn(
-        "group/live-work flex w-full max-w-full cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-        thoughtLine ? "flex-col items-start" : "min-h-6 items-center",
-      )}
-      aria-label={
-        failed
-          ? gt("{label}, tool call failed", {
-              label: `${thoughtLine ? `${thoughtLine} ` : ""}${threadLabel?.text ?? label}`,
-            })
-          : undefined
-      }
-      aria-expanded={row.expanded}
-      onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-    >
-      {thoughtLine ? (
-        <WorkLogRow
-          icon={
-            <span className="flex size-4 items-center justify-center text-icon-muted">
-              <ToolActivityIconView
-                icon={undefined}
-                fallbackName="brain"
-                className="block size-4 shrink-0 stroke-2"
-                muted
-              />
-            </span>
-          }
+    <div className={cn("flex w-full max-w-full gap-1", thoughtLine ? "items-end" : "items-center")}>
+      <button
+        type="button"
+        className={cn(
+          "group/live-work flex min-w-0 flex-1 max-w-full cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          thoughtLine ? "flex-col items-start" : "min-h-6 items-center",
+        )}
+        aria-label={
+          failed
+            ? gt("{label}, tool call failed", {
+                label: `${thoughtLine ? `${thoughtLine} ` : ""}${threadLabel?.text ?? label}`,
+              })
+            : undefined
+        }
+        aria-expanded={row.expanded}
+        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
+      >
+        {thoughtLine ? (
+          <WorkLogRow
+            icon={
+              <span className="flex size-4 items-center justify-center text-icon-muted">
+                <ToolActivityIconView
+                  icon={undefined}
+                  fallbackName="brain"
+                  className="block size-4 shrink-0 stroke-2"
+                  muted
+                />
+              </span>
+            }
+            label={
+              <span className="line-clamp-4">
+                <ChatMarkdown
+                  inline
+                  text={thoughtLine}
+                  cwd={ctx.markdownCwd}
+                  parseRawHtml={false}
+                  extraRemarkPlugins={thoughtPreviewPlugins(gt("Thought"))}
+                />
+              </span>
+            }
+            wrapLabel
+          />
+        ) : null}
+        <LiveActivityRow
           label={
-            <span className="line-clamp-4">
+            thoughtIsStatus ? (
+              row.active ? (
+                gt("Thinking")
+              ) : (
+                gt("Thought")
+              )
+            ) : row.entry.itemType === "reasoning" ? (
               <ChatMarkdown
                 inline
-                text={thoughtLine}
+                text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
                 cwd={ctx.markdownCwd}
                 parseRawHtml={false}
-                extraRemarkPlugins={thoughtPreviewPlugins(gt("Thought"))}
+                extraRemarkPlugins={
+                  row.active
+                    ? thoughtPreviewPlugins(gt("Thinking"))
+                    : thoughtPreviewPlugins(gt("Thought"))
+                }
               />
-            </span>
-          }
-          wrapLabel
-        />
-      ) : null}
-      <LiveActivityRow
-        label={
-          thoughtIsStatus ? (
-            row.active ? (
-              gt("Thinking")
+            ) : threadLabel ? (
+              <ThreadReadLabel
+                label={threadLabel}
+                environmentId={ctx.activeThreadEnvironmentId}
+                linked={false}
+              />
             ) : (
-              gt("Thought")
+              label
             )
-          ) : row.entry.itemType === "reasoning" ? (
-            <ChatMarkdown
-              inline
-              text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
-              cwd={ctx.markdownCwd}
-              parseRawHtml={false}
-              extraRemarkPlugins={
-                row.active
-                  ? thoughtPreviewPlugins(gt("Thinking"))
-                  : thoughtPreviewPlugins(gt("Thought"))
-              }
-            />
-          ) : threadLabel ? (
-            <ThreadReadLabel
-              label={threadLabel}
-              environmentId={ctx.activeThreadEnvironmentId}
-              linked={false}
-            />
-          ) : (
-            label
-          )
-        }
-        iconName={workEntryIconName(row.entry)}
-        toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
-        failed={failed}
-        active={row.active}
-      />
-    </button>
+          }
+          iconName={workEntryIconName(row.entry)}
+          toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
+          failed={failed}
+          active={row.active}
+        />
+      </button>
+      {/* fork: Move to background */}
+      <ForkMoveToBackgroundButton entry={row.entry} />
+    </div>
   );
 }
 

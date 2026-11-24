@@ -395,6 +395,54 @@ export function compileResolvedKeybindingsConfig(
 
 export const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS);
 
+function sameKeybindingShortcut(left: KeybindingShortcut, right: KeybindingShortcut): boolean {
+  return (
+    left.key === right.key &&
+    left.modKey === right.modKey &&
+    left.metaKey === right.metaKey &&
+    left.ctrlKey === right.ctrlKey &&
+    left.altKey === right.altKey &&
+    left.shiftKey === right.shiftKey
+  );
+}
+
+// fork: Keep a conditional toolCall.moveToBackground rule after an unconditional sidebar.toggle
+// on the same chord, even when an older keybindings.json persisted sidebar.toggle after it.
+function orderForkToolCallKeybindings(
+  rules: ReadonlyArray<ResolvedKeybindingRule>,
+): ResolvedKeybindingRule[] {
+  const ordered = [...rules];
+  for (let index = 0; index < ordered.length; index += 1) {
+    const rule = ordered[index];
+    if (
+      !rule ||
+      rule.command !== "toolCall.moveToBackground" ||
+      rule.whenAst === undefined ||
+      (rule.whenAst.type === "identifier" && rule.whenAst.name === "false")
+    ) {
+      continue;
+    }
+    let lastSidebarIndex = -1;
+    for (let candidate = index + 1; candidate < ordered.length; candidate += 1) {
+      const other = ordered[candidate];
+      if (
+        other &&
+        other.command === "sidebar.toggle" &&
+        other.whenAst === undefined &&
+        sameKeybindingShortcut(other.shortcut, rule.shortcut)
+      ) {
+        lastSidebarIndex = candidate;
+      }
+    }
+    if (lastSidebarIndex !== -1) {
+      ordered.splice(index, 1);
+      ordered.splice(lastSidebarIndex, 0, rule);
+      index -= 1;
+    }
+  }
+  return ordered;
+}
+
 export function mergeWithDefaultKeybindings(
   custom: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingsConfig {
@@ -406,7 +454,7 @@ export function mergeWithDefaultKeybindings(
   const retainedDefaults = DEFAULT_RESOLVED_KEYBINDINGS.filter(
     (binding) => !overriddenCommands.has(binding.command),
   );
-  const merged = [...retainedDefaults, ...custom];
+  const merged = orderForkToolCallKeybindings([...retainedDefaults, ...custom]);
 
   if (merged.length <= MAX_KEYBINDINGS_COUNT) {
     return merged;

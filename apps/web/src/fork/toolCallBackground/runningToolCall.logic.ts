@@ -1,3 +1,4 @@
+import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import type { TimelineEntry, WorkLogEntry } from "~/session-logic";
@@ -10,18 +11,56 @@ interface MovableInput {
   readonly enabled: boolean;
 }
 
-export const isMovableToolCall = (entry: WorkLogEntry, input: MovableInput) =>
+export interface MovableToolCallCandidate {
+  readonly id: string;
+  readonly createdAt: string;
+}
+
+const isShellDynamicToolName = (toolName: string | null | undefined) => {
+  if (toolName == null) return false;
+  const normalized = toolName.toLowerCase().replaceAll(/[\s_-]/g, "");
+  return normalized === "bash" || normalized === "powershell";
+};
+
+export const isMovableTurnItem = (item: OrchestrationV2TurnItem | undefined, input: MovableInput) =>
   input.enabled &&
   input.runLive &&
-  entry.structuredPayload?.nativeItemRef?.driver === "claudeAgent" &&
-  entry.structuredPayload.status === "running" &&
-  (entry.itemType === "command_execution" || entry.itemType === "subagent");
+  item?.nativeItemRef?.driver === "claudeAgent" &&
+  item.status === "running" &&
+  (item.type === "command_execution" ||
+    item.type === "subagent" ||
+    (item.type === "dynamic_tool" && isShellDynamicToolName(item.toolName)));
 
-export const newestMovableToolCall = (entries: ReadonlyArray<TimelineEntry>, input: MovableInput) =>
+export const isMovableToolCall = (entry: WorkLogEntry, input: MovableInput) =>
+  isMovableTurnItem(entry.structuredPayload, input);
+
+const movableCandidate = (
+  entry: TimelineEntry,
+  input: MovableInput,
+): MovableToolCallCandidate | null => {
+  if (entry.kind === "work") {
+    return isMovableToolCall(entry.entry, input)
+      ? { id: entry.entry.id, createdAt: entry.entry.createdAt }
+      : null;
+  }
+  if (entry.kind === "event") {
+    return isMovableTurnItem(entry.projectedItem.item, input)
+      ? { id: entry.id, createdAt: entry.createdAt }
+      : null;
+  }
+  return null;
+};
+
+export const newestMovableToolCall = (
+  entries: ReadonlyArray<TimelineEntry>,
+  input: MovableInput,
+): MovableToolCallCandidate | null =>
   entries
-    .flatMap((entry) => (entry.kind === "work" ? [entry.entry] : []))
-    .filter((entry) => isMovableToolCall(entry, input))
-    .reduce<WorkLogEntry | null>(
+    .flatMap((entry) => {
+      const candidate = movableCandidate(entry, input);
+      return candidate === null ? [] : [candidate];
+    })
+    .reduce<MovableToolCallCandidate | null>(
       (newest, entry) => (newest === null || entry.createdAt > newest.createdAt ? entry : newest),
       null,
     );

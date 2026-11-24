@@ -61,8 +61,11 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("keeps Move to background, which changes a running turn, behind operate scope", () => {
+  it("keeps Move to background and Stop tool call, which change a running turn, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(FORK_TOOL_CALL_WS_METHODS.moveToBackground)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(FORK_TOOL_CALL_WS_METHODS.stop)).toBe(
       AuthOrchestrationOperateScope,
     );
   });

@@ -6218,6 +6218,87 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     );
 
+    it.effect("classifies a Windows PowerShell tool_use as command_execution and moves it", () =>
+      Effect.gen(function* () {
+        const backgroundCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          backgroundTasks: (toolUseId) =>
+            Effect.sync(() => {
+              backgroundCalls.push(toolUseId);
+              return toolUseId === "toolu_ps_1";
+            }),
+        });
+        const moveToolCallToBackground = harness.runtime.moveToolCallToBackground;
+        assert.isDefined(moveToolCallToBackground);
+        if (moveToolCallToBackground === undefined) return;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-claude-move-powershell"),
+          text: "Run a slow PowerShell command in the foreground.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            uuid: "00000000-0000-4000-8000-000000038011",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: {
+              id: "msg_move_to_background_ps",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_ps_1",
+                  name: "PowerShell",
+                  input: { command: "ping -n 601 127.0.0.1 > $null" },
+                },
+              ],
+            },
+          }),
+        );
+        yield* harness.until(() =>
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.nativeItemRef?.nativeId === "toolu_ps_1",
+          ),
+        );
+        const psItem = harness.events.find(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.nativeItemRef?.nativeId === "toolu_ps_1",
+        );
+        assert.isDefined(psItem);
+        assert.equal(
+          psItem?.type === "turn_item.updated" ? psItem.turnItem.type : null,
+          "command_execution",
+        );
+
+        const moved = yield* moveToolCallToBackground({
+          providerThread: harness.providerThread,
+          nativeItemId: "toolu_ps_1",
+        });
+        assert.isTrue(moved);
+        assert.deepStrictEqual(backgroundCalls, ["toolu_ps_1"]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
     it.effect("moves a foreground subagent row by its task id", () =>
       Effect.gen(function* () {
         const backgroundCalls: Array<string> = [];
@@ -6297,6 +6378,147 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         assert.equal(error._tag, "ProviderAdapterProtocolError");
         assert.deepStrictEqual(backgroundCalls, []);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+  });
+
+  describe("stopToolCall", () => {
+    it.effect("maps a foreground PowerShell tool_use id to its task id and calls stopTask", () =>
+      Effect.gen(function* () {
+        const stopCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          stopTask: (taskId) =>
+            Effect.sync(() => {
+              stopCalls.push(taskId);
+            }),
+        });
+        const stopToolCall = harness.runtime.stopToolCall;
+        assert.isDefined(stopToolCall);
+        if (stopToolCall === undefined) return;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-claude-stop-tool-call"),
+          text: "Run a slow PowerShell command in the foreground.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            uuid: "00000000-0000-4000-8000-000000038021",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: {
+              id: "msg_stop_tool_call_ps",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_stop_ps_1",
+                  name: "PowerShell",
+                  input: { command: "ping -n 601 127.0.0.1 > $null" },
+                },
+              ],
+            },
+          }),
+        );
+        // Before task_started arrives, no task id is known yet.
+        assert.isFalse(
+          yield* stopToolCall({
+            providerThread: harness.providerThread,
+            nativeItemId: "toolu_stop_ps_1",
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-stop-ps-1",
+            tool_use_id: "toolu_stop_ps_1",
+            description: "Slow PowerShell command",
+            is_backgrounded: false,
+            task_type: "local_bash",
+            uuid: "00000000-0000-4000-8000-000000038022",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        const stopped = yield* stopToolCall({
+          providerThread: harness.providerThread,
+          nativeItemId: "toolu_stop_ps_1",
+        });
+        assert.isTrue(stopped);
+        assert.deepStrictEqual(stopCalls, ["task-stop-ps-1"]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect("stops a running subagent row by its task id", () =>
+      Effect.gen(function* () {
+        const stopCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          stopTask: (taskId) =>
+            Effect.sync(() => {
+              stopCalls.push(taskId);
+            }),
+        });
+        const stopToolCall = harness.runtime.stopToolCall;
+        assert.isDefined(stopToolCall);
+        if (stopToolCall === undefined) return;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-stop-subagent"),
+            text: "Run a subagent.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-stop-subagent-1",
+            tool_use_id: "toolu_stop_agent_1",
+            description: "Audit",
+            is_backgrounded: false,
+            task_type: "local_agent",
+            prompt: "Audit the commits.",
+            uuid: "00000000-0000-4000-8000-000000038023",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+
+        const stopped = yield* stopToolCall({
+          providerThread: harness.providerThread,
+          nativeItemId: "task-stop-subagent-1",
+        });
+        assert.isTrue(stopped);
+        assert.deepStrictEqual(stopCalls, ["task-stop-subagent-1"]);
       }).pipe(
         Effect.scoped,
         Effect.provide(

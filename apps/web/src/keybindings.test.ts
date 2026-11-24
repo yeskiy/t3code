@@ -887,6 +887,93 @@ describe("Move to background shortcut", () => {
       "sidebar.toggle",
     );
   });
+
+  it("wins over a persisted default sidebar.toggle rule after merging defaults", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([{ key: "mod+b", command: "sidebar.toggle" }]),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+      "toolCall.moveToBackground",
+    );
+    assert.isFalse(
+      isSidebarToggleShortcut(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: false },
+      }),
+      "sidebar.toggle",
+    );
+  });
+
+  it("wins even when an existing keybindings.json already backfilled toolCall.moveToBackground before sidebar.toggle", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        {
+          key: "mod+b",
+          command: "toolCall.moveToBackground",
+          when: "foregroundToolRunning && !terminalFocus",
+        },
+        { key: "mod+b", command: "sidebar.toggle" },
+      ]),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+      "toolCall.moveToBackground",
+    );
+    assert.isFalse(
+      isSidebarToggleShortcut(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlB, bindings, {
+        platform: "Win32",
+        context: { foregroundToolRunning: false },
+      }),
+      "sidebar.toggle",
+    );
+  });
+
+  it("keeps toolCall.stop unbound by default and resolves it when bound in settings", () => {
+    assert.isNull(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "toolCall.stop"));
+    const custom = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        {
+          key: "mod+shift+x",
+          command: "toolCall.stop",
+          when: "foregroundToolRunning && !terminalFocus",
+        },
+      ]),
+    );
+    const chord = event({ key: "x", ctrlKey: true, shiftKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(chord, custom, {
+        platform: "Win32",
+        context: { foregroundToolRunning: true },
+      }),
+      "toolCall.stop",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(chord, custom, {
+        platform: "Win32",
+        context: { foregroundToolRunning: false },
+      }),
+      "composer.workspace",
+    );
+  });
 });
 
 describe("composer and pull request shortcuts", () => {
