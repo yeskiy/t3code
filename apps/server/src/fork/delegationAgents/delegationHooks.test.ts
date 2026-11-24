@@ -19,6 +19,8 @@ import {
   forkCodexAgentContext,
   forkPrepareDelegation,
 } from "./delegationHooks.ts";
+import { advertisedJsonSchema } from "../../mcp/advertisedJsonSchema.ts";
+import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
 
 const failure = (code: OrchestratorMcpFailure["code"], message: string): OrchestratorMcpFailure =>
   new OrchestratorMcpFailure({ code, message });
@@ -322,4 +324,14 @@ describe("forkPrepareDelegation", () => {
         });
       }),
   );
+});
+
+describe("delegate_task input schema", () => {
+  it("carries the agent field description into tools/list", () => {
+    const schema = advertisedJsonSchema(OrchestratorToolkit.tools.delegate_task);
+    const properties = schema.properties as Record<string, { readonly description?: string }>;
+    expect(properties.agent?.description).toBe(
+      "Name of a T3 agent from orchestrator_capabilities. Its instructions, limits, and model defaults apply to the child.",
+    );
+  });
 });

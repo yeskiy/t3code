@@ -10,12 +10,10 @@ export const ForkAgentName = TrimmedNonEmptyString.check(
 );
 export type ForkAgentName = typeof ForkAgentName.Type;
 
-export const ForkDelegateTaskAgentField = Schema.optional(
-  ForkAgentName.annotate({
-    description:
-      "Agent name from `orchestrator_capabilities` `agents`. Omit to use the agent of `role`.",
-  }),
-);
+export const ForkDelegateTaskAgentField = Schema.optional(ForkAgentName).annotate({
+  description:
+    "Name of a T3 agent from orchestrator_capabilities. Its instructions, limits, and model defaults apply to the child.",
+});
 
 export const ForkAgentSummary = Schema.Struct({
   name: Schema.String,

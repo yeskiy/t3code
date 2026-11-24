@@ -1,4 +1,4 @@
-import type { ForkTurnAgent, ThreadId } from "@t3tools/contracts";
+import type { ForkTurnAgent, ServerSettings, ThreadId } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -6,11 +6,17 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  DEFAULT_CLAUDE_SYNCED_SKILLS_INSTANCE,
+  resolveSyncedSkillsForClaudeInstance,
+} from "../syncedSkills/ClaudeSyncedSkills.ts";
 import { ForkAgentError, parseAgentFile, type ForkAgentDefinition } from "./agentFile.ts";
 import { readSkillText, skillRoots } from "./skillText.ts";
 
@@ -54,6 +60,7 @@ export const make = Effect.fn("fork.ForkDelegationAgents.make")(function* (input
   readonly agentsDir: string;
   readonly storePath: string;
   readonly skillRoots: ReadonlyArray<string>;
+  readonly extraSkillRoots?: Effect.Effect<ReadonlyArray<string>>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -97,12 +104,22 @@ export const make = Effect.fn("fork.ForkDelegationAgents.make")(function* (input
     return agents;
   }).pipe(Effect.provide(services));
 
+  const resolveRoots = input.extraSkillRoots
+    ? input.extraSkillRoots.pipe(
+        Effect.map((extra) => [...input.skillRoots, ...extra]),
+        Effect.orElseSucceed(() => input.skillRoots),
+      )
+    : Effect.succeed(input.skillRoots);
+
   const instructionsOf = (agent: ForkAgentDefinition) =>
-    Effect.forEach(agent.skills, (name) =>
-      readSkillText({ name, roots: input.skillRoots }).pipe(
-        Effect.map((text) => `### Skill: ${name}\n\n${text}`),
+    (agent.skills.length === 0 ? Effect.succeed(input.skillRoots) : resolveRoots).pipe(
+      Effect.flatMap((roots) =>
+        Effect.forEach(agent.skills, (name) =>
+          readSkillText({ name, roots }).pipe(
+            Effect.map((text) => `### Skill: ${name}\n\n${text}`),
+          ),
+        ),
       ),
-    ).pipe(
       Effect.map((skills) =>
         [
           `## T3 agent: ${agent.name}`,
@@ -189,11 +206,35 @@ export const layer = Layer.effect(
   ForkDelegationAgents,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
+    const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const home = yield* HostProcess.HomeDirectory;
+    const platform = yield* HostProcess.Platform;
+    const hostEnvironment = yield* HostProcess.Environment;
+    const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
+    const emptySettings: Pick<ServerSettings, "providerInstances"> = { providerInstances: {} };
+    const extraSkillRoots = (
+      Option.isSome(serverSettings)
+        ? serverSettings.value.getSettings.pipe(Effect.orElseSucceed(() => emptySettings))
+        : Effect.succeed(emptySettings)
+    ).pipe(
+      Effect.flatMap((settings) =>
+        resolveSyncedSkillsForClaudeInstance({
+          claudeInstanceId: DEFAULT_CLAUDE_SYNCED_SKILLS_INSTANCE,
+          settings,
+          hostEnvironment,
+        }),
+      ),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(HostProcess.HomeDirectory, home),
+      Effect.provideService(HostProcess.Platform, platform),
+    );
     return yield* make({
       agentsDir: path.join(config.stateDir, "agents"),
       storePath: path.join(config.stateDir, "fork", "delegation-agents.json"),
-      skillRoots: skillRoots(path, yield* HostProcess.HomeDirectory),
+      skillRoots: skillRoots(path, home),
+      extraSkillRoots,
     });
   }),
 );

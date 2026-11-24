@@ -297,4 +297,84 @@ describe("ForkDelegationAgents", () => {
       expect(yield* fs.exists(path.join(stateDir, "fork", "delegation-agents.json"))).toBe(true);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.effect(
+    "finds claude.ai synced skills after home roots and respects syncClaudeAiSkills: false",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-agent-synced-home-" });
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-agent-synced-base-" });
+        const stateDir = path.join(baseDir, "userdata");
+        const agentsDir = path.join(stateDir, "agents");
+        const orgId = "11111111-2222-4333-8444-555555555555";
+        const accountId = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+        const bucket = `${orgId}_${accountId}`;
+        const syncedDir = path.join(home, ".claude", "skills", "synced");
+        const syncedDocxDir = path.join(syncedDir, bucket, "docx");
+        const syncedPdfDir = path.join(syncedDir, bucket, "pdf");
+        const localPdfDir = path.join(home, ".claude", "skills", "pdf");
+
+        yield* fs.makeDirectory(agentsDir, { recursive: true });
+        yield* fs.makeDirectory(syncedDocxDir, { recursive: true });
+        yield* fs.makeDirectory(syncedPdfDir, { recursive: true });
+        yield* fs.makeDirectory(localPdfDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(home, ".claude.json"),
+          JSON.stringify({
+            oauthAccount: { organizationUuid: orgId, accountUuid: accountId },
+          }),
+        );
+        yield* fs.writeFileString(path.join(syncedDir, `.bucket-${bucket}`), "");
+        yield* fs.writeFileString(
+          path.join(syncedDocxDir, "SKILL.md"),
+          "---\nname: docx\ndescription: Word documents.\n---\n\nSynced docx body.\n",
+        );
+        yield* fs.writeFileString(
+          path.join(syncedPdfDir, "SKILL.md"),
+          "---\nname: pdf\n---\n\nSynced pdf body.\n",
+        );
+        yield* fs.writeFileString(
+          path.join(localPdfDir, "SKILL.md"),
+          "---\nname: pdf\n---\n\nLocal pdf body.\n",
+        );
+        yield* fs.writeFileString(
+          path.join(agentsDir, "docs.md"),
+          "---\nname: docs\ndescription: Document helper.\nskills: [docx, pdf]\n---\n\nHandle documents.\n",
+        );
+
+        const testLayer = layer.pipe(
+          Layer.provide(ServerConfig.layerTest(baseDir, baseDir)),
+          Layer.provide(Layer.succeed(HostProcess.HomeDirectory, home)),
+          Layer.provide(Layer.succeed(HostProcess.Environment, {})),
+          Layer.provide(Layer.succeed(HostProcess.Platform, "win32")),
+        );
+        const threadId = makeThreadId("thread-synced-1");
+        const resolved = yield* Effect.gen(function* () {
+          const service = yield* ForkDelegationAgents;
+          yield* service.resolveForTask({ agent: "docs" });
+          yield* service.record(threadId, "docs");
+          return yield* service.forThread(threadId);
+        }).pipe(Effect.provide(testLayer));
+
+        expect(resolved).toEqual({
+          name: "docs",
+          limits: [],
+          instructions:
+            "## T3 agent: docs\n\nHandle documents.\n\n### Skill: docx\n\nSynced docx body.\n\n### Skill: pdf\n\nLocal pdf body.",
+        });
+
+        yield* fs.writeFileString(
+          path.join(home, ".claude", "settings.json"),
+          JSON.stringify({ syncClaudeAiSkills: false }),
+        );
+        const hiddenError = yield* Effect.gen(function* () {
+          const service = yield* ForkDelegationAgents;
+          return yield* Effect.flip(service.resolveForTask({ agent: "docs" }));
+        }).pipe(Effect.provide(testLayer));
+
+        expect(hiddenError.message).toContain("Skill docx is not in ");
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
