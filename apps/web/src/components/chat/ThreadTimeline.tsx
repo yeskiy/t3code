@@ -10,6 +10,8 @@ import {
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
+// fork: transcript edit
+import { withoutForkHiddenItems } from "../../fork/transcriptEdit/hiddenItems.logic";
 
 /**
  * The timeline with the streamed text. ChatView reads the thread through its quiet
@@ -35,7 +37,8 @@ export function ThreadTimeline({
   syncing: boolean;
   detailLoading: boolean;
 }) {
-  const visibleTurnItems = useTimelineVisibleTurnItems(threadDetailRef);
+  // fork: transcript edit
+  const visibleTurnItems = withoutForkHiddenItems(useTimelineVisibleTurnItems(threadDetailRef));
   const serverEntries = useIncrementalTimelineEntries(activeThreadKey, {
     ...entriesInput,
     visibleTurnItems,

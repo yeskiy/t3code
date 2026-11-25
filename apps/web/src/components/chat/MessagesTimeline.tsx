@@ -146,6 +146,11 @@ import { useThreadFindPositionReader } from "./useThreadFindPositionReader";
 import { ThreadActivityAnnouncer } from "./ThreadActivityAnnouncer";
 import { useStableHandoffRuns, useIncrementalTimelineRows, useStableRows } from "./useTimelineRows";
 import { useClientSettings } from "../../hooks/useSettings";
+// fork: transcript edit
+import {
+  ForkTranscriptRowFrame,
+  useForkTranscriptAlwaysRenderRowIds,
+} from "~/fork/transcriptEdit/ForkTranscriptRowFrame";
 
 function timelineListStateFor(identity: string): {
   readonly identity: string;
@@ -893,7 +898,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // last messages mounted lets heading navigation wrap to either end.
   const firstMessageRow = rows.find(isMessageRow);
   const lastMessageRow = rows.findLast(isMessageRow);
+  const forkOpenRowIds = useForkTranscriptAlwaysRenderRowIds(routeThreadKey); // fork: transcript edit
   const alwaysRenderKeys = [
+    ...forkOpenRowIds,
     ...(firstMessageRow ? [firstMessageRow.id] : []),
     ...(lastMessageRow && lastMessageRow !== firstMessageRow ? [lastMessageRow.id] : []),
     ...(citationAlwaysRender?.keys ?? []),
@@ -1413,7 +1420,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
           data-timeline-root="true"
         >
           <AudioPreviewUnmountContext value={onAudioUnmount}>
-            <TimelineRowContent row={item} />
+            {/* fork: transcript edit */}
+            <ForkTranscriptRowFrame row={item}>
+              <TimelineRowContent row={item} />
+            </ForkTranscriptRowFrame>
           </AudioPreviewUnmountContext>
         </div>
       </div>

@@ -65,6 +65,8 @@ import {
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
 // fork: Move to background
 import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
+// fork: transcript edit
+import { ForkEditRowButton } from "~/fork/transcriptEdit/ForkEditRowButton";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -717,8 +719,9 @@ export function LiveWorkEntryTimelineRow({
           active={row.active}
         />
       </button>
-      {/* fork: Move to background */}
+      {/* fork: Move to background, transcript edit */}
       <ForkMoveToBackgroundButton entry={row.entry} />
+      <ForkEditRowButton projectedItem={row.entry.projectedItem} reveal="work" />
     </div>
   );
 }

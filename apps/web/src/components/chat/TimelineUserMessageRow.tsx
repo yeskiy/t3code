@@ -58,6 +58,8 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { GuestMessageName, guestBubbleClassName } from "./guestMessageStyle";
 import { MessageCopyButton } from "./MessageCopyButton";
+// fork: transcript edit
+import { ForkEditRowButton } from "~/fork/transcriptEdit/ForkEditRowButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { formatBytes } from "../../lib/formatBytes";
@@ -373,6 +375,8 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               {typeof revertTurnCount === "number" && (
                 <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
               )}
+              {/* fork: transcript edit */}
+              <ForkEditRowButton projectedItem={row.projectedItem} reveal="user" />
               <MessageCopyButton text={text} variant="ghost" />
               {promptLink !== null && (
                 <MessageCopyButton
@@ -876,6 +880,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         {typeof revertTurnCount === "number" && (
           <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
         )}
+        {/* fork: transcript edit */}
+        <ForkEditRowButton projectedItem={row.projectedItem} reveal="user" />
         {copyText && (
           <MessageCopyButton
             text={contextClipboardFragment ? copyText : plainText}
