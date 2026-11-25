@@ -468,3 +468,99 @@ it.effect("portable fork history keeps history past a restarted scheduled fresh 
     ]);
   }),
 );
+
+// fork: transcript edit
+it.effect("drops forkTranscriptHidden items from fork history, visible items, and handoffs", () =>
+  Effect.gen(function* () {
+    const keptRun = RunId.make("run:source-kept");
+    const visibleItem = clearUserItem("kept", clearSourceId, keptRun, "kept prompt", 1);
+    const hiddenItem = {
+      ...clearUserItem("hidden", clearSourceId, keptRun, "deleted secret prompt", 2),
+      forkTranscriptHidden: true as const,
+    };
+
+    const forkTexts = yield* readClearFork(
+      [clearRun(keptRun, clearSourceId, 1)],
+      [visibleItem, hiddenItem],
+    );
+    assert.deepEqual(forkTexts, ["ancestor history", "kept prompt"]);
+
+    const visibleItems = ContextHandoffService.visibleConversationItems(
+      { runs: [clearRun(keptRun, clearSourceId, 1)], attempts: [] },
+      [visibleItem, hiddenItem],
+    );
+    assert.deepEqual(
+      visibleItems.map((item) => item.id),
+      [visibleItem.id],
+    );
+
+    const service = yield* ContextHandoffService.ContextHandoffServiceV2;
+    const providerHandoff = yield* service.prepareProviderHandoff({
+      threadId: clearSourceId,
+      targetRunId: RunId.make("run:target"),
+      transferId: ContextTransferId.make("transfer:hidden"),
+      fromProviderThreadIds: [ProviderThreadId.make("pt:from")],
+      toProviderThreadId: ProviderThreadId.make("pt:to"),
+      fromProviderInstanceId: ProviderInstanceId.make("claudeAgent"),
+      toProviderInstanceId: ProviderInstanceId.make("codex"),
+      coveredRunOrdinals: { from: 1, to: 1 },
+      strategy: "full_thread_summary",
+      items: [visibleItem, hiddenItem],
+      createdAt: clearNow,
+    });
+    assert.deepEqual(
+      providerHandoff.history?.messages.map((message) => message.itemId),
+      [visibleItem.id],
+    );
+    assert.notInclude(providerHandoff.summaryText, "deleted secret prompt");
+    assert.notInclude(providerHandoff.history?.coverage ?? "", hiddenItem.id);
+
+    const legacyHandoff = yield* service.prepareLegacyImport({
+      threadId: clearSourceId,
+      targetRunId: RunId.make("run:target-legacy"),
+      toProviderThreadId: ProviderThreadId.make("pt:to"),
+      toProviderInstanceId: ProviderInstanceId.make("codex"),
+      items: [visibleItem, hiddenItem],
+      createdAt: clearNow,
+    });
+    assert.notInclude(legacyHandoff.summaryText, "deleted secret prompt");
+    assert.deepEqual(
+      legacyHandoff.history?.messages.map((message) => message.itemId),
+      [visibleItem.id],
+    );
+
+    const deltaHandoff = yield* service.prepareForkDelta({
+      sourceThreadId: clearSourceId,
+      targetThreadId: ThreadId.make("thread:merge-target"),
+      targetRunId: RunId.make("run:target-delta"),
+      transferId: ContextTransferId.make("transfer:delta-hidden"),
+      fromProviderThreadIds: [ProviderThreadId.make("pt:from")],
+      toProviderThreadId: ProviderThreadId.make("pt:to"),
+      fromProviderInstanceId: ProviderInstanceId.make("claudeAgent"),
+      toProviderInstanceId: ProviderInstanceId.make("codex"),
+      coveredRunOrdinals: { from: 1, to: 1 },
+      deltaItems: [visibleItem, hiddenItem],
+      createdAt: clearNow,
+    });
+    assert.notInclude(deltaHandoff.summaryText, "deleted secret prompt");
+    assert.deepEqual(
+      deltaHandoff.history?.messages.map((message) => message.itemId),
+      [visibleItem.id],
+    );
+
+    const sideChatHandoff = yield* service.prepareSideChatContext({
+      parentThreadId: clearSourceId,
+      threadId: ThreadId.make("thread:side-hidden"),
+      targetRunId: RunId.make("run:target-side"),
+      transferId: ContextTransferId.make("transfer:side-hidden"),
+      toProviderThreadId: ProviderThreadId.make("pt:to"),
+      fromProviderInstanceId: ProviderInstanceId.make("claudeAgent"),
+      toProviderInstanceId: ProviderInstanceId.make("codex"),
+      coveredRunOrdinals: { from: 1, to: 1 },
+      parentItems: [visibleItem, hiddenItem],
+      createdAt: clearNow,
+    });
+    assert.include(sideChatHandoff.summaryText, "kept prompt");
+    assert.notInclude(sideChatHandoff.summaryText, "deleted secret prompt");
+  }).pipe(Effect.provide(layerTest)),
+);

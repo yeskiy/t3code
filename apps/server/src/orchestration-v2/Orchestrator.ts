@@ -146,6 +146,8 @@ import {
   visibleConversationItems,
   visibleDeltaRunOrdinals,
 } from "./ContextHandoffService.ts";
+// fork: transcript edit
+import { forkVisibleTurnItems } from "../fork/transcriptEdit/visibleItems.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import {
   cancelledBeforeStart,
@@ -1934,7 +1936,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runIds === undefined ? undefined : { turnItemRunIds: runIds },
       )
       .pipe(
-        Effect.map((records) => records.turnItems),
+        // fork: transcript edit
+        Effect.map((records) => forkVisibleTurnItems(records.turnItems)),
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       );
 

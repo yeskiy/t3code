@@ -24,6 +24,8 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   FORK_TOOL_CALL_WS_METHODS,
   FORK_DELEGATION_AGENTS_WS_METHODS,
+  // fork: transcript edit
+  FORK_TRANSCRIPT_EDIT_WS_METHODS,
   RunId,
   WS_METHODS,
   WsRpcGroup,
@@ -85,6 +87,25 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(FORK_DELEGATION_AGENTS_WS_METHODS.forThread)).toBe(
       AuthOrchestrationReadScope,
     );
+  });
+
+  // fork: transcript edit
+  it("guards transcript edit reads with read scope and writes with operate scope", () => {
+    [
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.load,
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.preview,
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.backups,
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.blockText,
+    ].forEach((method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    });
+    [
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.save,
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.restore,
+      FORK_TRANSCRIPT_EDIT_WS_METHODS.deleteBackup,
+    ].forEach((method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    });
   });
 
   it("separates passive terminal observation from operations that can change a shell", () => {

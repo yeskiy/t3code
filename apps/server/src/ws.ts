@@ -132,6 +132,9 @@ import * as ForkToolCallControl from "./fork/ForkToolCallControl.ts";
 // fork: delegation agent views.
 import { ForkDelegationAgents } from "./fork/delegationAgents/ForkDelegationAgents.ts";
 import { forkDelegationAgentsRpcHandlers } from "./fork/delegationAgents/delegationAgentsRpc.ts";
+// fork: transcript edit.
+import { ForkTranscriptEdit } from "./fork/transcriptEdit/ForkTranscriptEdit.ts";
+import { forkTranscriptEditRpcHandlers } from "./fork/transcriptEdit/transcriptEditRpc.ts";
 import * as ThreadViewers from "./orchestration-v2/ThreadViewers.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
@@ -1475,6 +1478,7 @@ export const layerWsRpc = (
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const forkToolCalls = yield* ForkToolCallControl.ForkToolCallControl; // fork: Move to background
       const forkDelegationAgents = yield* ForkDelegationAgents; // fork: delegation agent views
+      const forkTranscriptEdit = yield* ForkTranscriptEdit; // fork: transcript edit
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
@@ -2133,6 +2137,8 @@ export const layerWsRpc = (
             ),
           providers: providerRegistry.getProviders,
         }),
+        // fork: transcript edit.
+        ...forkTranscriptEditRpcHandlers(forkTranscriptEdit),
         [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
           threadManagement.forceStopThread(input),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>

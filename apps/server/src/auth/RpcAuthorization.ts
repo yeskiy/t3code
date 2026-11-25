@@ -32,6 +32,7 @@ import {
   EnvironmentAuthorizationError,
   FORK_TOOL_CALL_WS_METHODS, // fork: Move to background RPC
   FORK_DELEGATION_AGENTS_WS_METHODS, // fork: delegation agent views
+  FORK_TRANSCRIPT_EDIT_WS_METHODS, // fork: transcript edit
   RpcScopeAuthorization,
   WS_METHODS,
   WsRpcGroup,
@@ -56,6 +57,14 @@ export const RPC_REQUIRED_SCOPES = {
   // fork: delegation agent views only read agent files and the child-to-agent store.
   [FORK_DELEGATION_AGENTS_WS_METHODS.list]: AuthOrchestrationReadScope,
   [FORK_DELEGATION_AGENTS_WS_METHODS.forThread]: AuthOrchestrationReadScope,
+  // fork: transcript edit reads stay behind read scope; writes mutate the session file.
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.load]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.preview]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.backups]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.blockText]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.save]: AuthOrchestrationOperateScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.restore]: AuthOrchestrationOperateScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.deleteBackup]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff]: AuthOrchestrationReadScope,

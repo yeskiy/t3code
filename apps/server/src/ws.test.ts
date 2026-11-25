@@ -184,6 +184,8 @@ import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ForkToolCallControl from "./fork/ForkToolCallControl.ts";
 import { forkDelegationAgentsLayerEmpty } from "./fork/delegationAgents/delegationHooks.ts";
+// fork: transcript edit.
+import { ForkTranscriptEdit } from "./fork/transcriptEdit/ForkTranscriptEdit.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "./orchestration-v2/EventSink.ts";
@@ -916,6 +918,8 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ThreadManagement.ThreadManagementService)({}),
   Layer.mock(ForkToolCallControl.ForkToolCallControl)({}),
   forkDelegationAgentsLayerEmpty,
+  // fork: transcript edit.
+  Layer.mock(ForkTranscriptEdit)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
   Layer.mock(UsageService.UsageService)({}),
   Layer.mock(VcsProvisioningService.VcsProvisioningService)({}),
