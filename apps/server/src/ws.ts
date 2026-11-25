@@ -129,6 +129,9 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
 // fork: Move to background for one tool call.
 import * as ForkToolCallControl from "./fork/ForkToolCallControl.ts";
+// fork: delegation agent views.
+import { ForkDelegationAgents } from "./fork/delegationAgents/ForkDelegationAgents.ts";
+import { forkDelegationAgentsRpcHandlers } from "./fork/delegationAgents/delegationAgentsRpc.ts";
 import * as ThreadViewers from "./orchestration-v2/ThreadViewers.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
@@ -1471,6 +1474,7 @@ export const layerWsRpc = (
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const forkToolCalls = yield* ForkToolCallControl.ForkToolCallControl; // fork: Move to background
+      const forkDelegationAgents = yield* ForkDelegationAgents; // fork: delegation agent views
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
@@ -2119,6 +2123,16 @@ export const layerWsRpc = (
         [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: (input) =>
           forkToolCalls.moveToBackground(input),
         [FORK_TOOL_CALL_WS_METHODS.stop]: (input) => forkToolCalls.stop(input),
+        // fork: delegation agent views.
+        ...forkDelegationAgentsRpcHandlers({
+          agents: forkDelegationAgents,
+          threadModel: (threadId) =>
+            orchestrationEngine.getThreadRecords(threadId, []).pipe(
+              Effect.map((records) => records.thread.modelSelection),
+              Effect.orElseSucceed(() => undefined),
+            ),
+          providers: providerRegistry.getProviders,
+        }),
         [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
           threadManagement.forceStopThread(input),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>

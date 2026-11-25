@@ -377,4 +377,104 @@ describe("ForkDelegationAgents", () => {
         expect(hiddenError.message).toContain("Skill docx is not in ");
       }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  describe("describe", () => {
+    it.effect("summarizes every agent with skills, defaults, and the agent text size", () =>
+      Effect.gen(function* () {
+        const { agentsDir, skillsDir, storePath } = yield* writeFixtures;
+        const service = yield* make({ agentsDir, storePath, skillRoots: [skillsDir] });
+        const threadId = makeThreadId("thread-describe-1");
+        yield* service.record(threadId, "researcher");
+        const text = (yield* service.forThread(threadId))?.instructions ?? "";
+
+        const all = yield* service.describe({ includeInstructions: false });
+        expect(all.map((agent) => agent.name)).toEqual([
+          "planner",
+          "researcher",
+          "worker",
+          "writer",
+        ]);
+        expect(all.find((agent) => agent.name === "researcher")).toEqual({
+          name: "researcher",
+          description: "Read-only research.",
+          roles: ["research", "review"],
+          limits: ["read-only", "no-delegation"],
+          skills: ["ste-base"],
+          defaults: [{ driver: "claudeAgent", model: "claude-opus-5-5", effort: "medium" }],
+          instructionsBytes: Buffer.byteLength(text),
+        });
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    it.effect("adds the agent text only on request", () =>
+      Effect.gen(function* () {
+        const { agentsDir, skillsDir, storePath } = yield* writeFixtures;
+        const service = yield* make({ agentsDir, storePath, skillRoots: [skillsDir] });
+        const [writer] = yield* service.describe({ includeInstructions: true, name: "writer" });
+        expect(writer?.instructions).toBe("## T3 agent: writer\n\nWrite crisp prose.");
+        expect(writer?.instructionsBytes).toBe(Buffer.byteLength(writer?.instructions ?? ""));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    it.effect("returns the agent recorded for a thread and nothing for other threads", () =>
+      Effect.gen(function* () {
+        const { agentsDir, skillsDir, storePath } = yield* writeFixtures;
+        const service = yield* make({ agentsDir, storePath, skillRoots: [skillsDir] });
+        const child = makeThreadId("thread-describe-child");
+        yield* service.record(child, "planner");
+
+        const recorded = yield* service.describe({ includeInstructions: false, threadId: child });
+        expect(recorded.map((agent) => agent.name)).toEqual(["planner"]);
+        const other = yield* service.describe({
+          includeInstructions: false,
+          threadId: makeThreadId("thread-describe-other"),
+        });
+        expect(other).toEqual([]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    it.effect("keeps a broken agent in the list with its problem and no size", () =>
+      Effect.gen(function* () {
+        const { agentsDir, skillsDir, storePath } = yield* writeFixtures;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.writeFileString(
+          path.join(agentsDir, "broken.md"),
+          "---\nname: broken\ndescription: Broken.\nskills: [missing-skill]\n---\n\nBody\n",
+        );
+        const service = yield* make({ agentsDir, storePath, skillRoots: [skillsDir] });
+        const broken = (yield* service.describe({ includeInstructions: true })).find(
+          (agent) => agent.name === "broken",
+        );
+        expect(broken?.skills).toEqual(["missing-skill"]);
+        expect(broken?.instructionsBytes).toBeUndefined();
+        expect(broken?.instructions).toBeUndefined();
+        expect(broken?.problem).toContain("Skill missing-skill is not in ");
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    it.effect("names a recorded agent whose file is gone", () =>
+      Effect.gen(function* () {
+        const { agentsDir, skillsDir, storePath } = yield* writeFixtures;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const service = yield* make({ agentsDir, storePath, skillRoots: [skillsDir] });
+        const child = makeThreadId("thread-describe-gone");
+        yield* service.record(child, "worker");
+        yield* fs.remove(path.join(agentsDir, "worker.md"));
+
+        expect(yield* service.describe({ includeInstructions: false, threadId: child })).toEqual([
+          {
+            name: "worker",
+            description: "",
+            roles: [],
+            limits: [],
+            skills: [],
+            defaults: [],
+            problem: "Agent worker is no longer defined.",
+          },
+        ]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+  });
 });

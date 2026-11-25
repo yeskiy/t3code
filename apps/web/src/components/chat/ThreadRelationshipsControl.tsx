@@ -3,6 +3,7 @@ import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ForkAgentBadge } from "~/fork/delegationAgents/ForkAgentBadge"; // fork: delegation agent badge
 import { SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
@@ -1078,29 +1079,33 @@ export function ThreadRelationshipsPanel(props: {
           }
           data-thread-relationships-panel
           actions={
-            canDetach ? (
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <ThreadDetailsControl
-                      size="icon-xs"
-                      variant="ghost"
-                      part="icon"
-                      aria-label={gt("More thread actions")}
-                      disabled={busyAction !== null}
-                    />
-                  }
-                >
-                  <MoreHorizontalIcon className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
-                  <MenuItem onClick={() => void detach()}>
-                    <UnplugIcon className="size-3.5" />
-                    <T>Disconnect agent session</T>
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            ) : null
+            <>
+              {/* fork: delegation agent badge */}
+              <ForkAgentBadge environmentId={props.environmentId} threadId={props.threadId} />
+              {canDetach ? (
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <ThreadDetailsControl
+                        size="icon-xs"
+                        variant="ghost"
+                        part="icon"
+                        aria-label={gt("More thread actions")}
+                        disabled={busyAction !== null}
+                      />
+                    }
+                  >
+                    <MoreHorizontalIcon className="size-3.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
+                    <MenuItem onClick={() => void detach()}>
+                      <UnplugIcon className="size-3.5" />
+                      <T>Disconnect agent session</T>
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              ) : null}
+            </>
           }
         >
           {delegatedFrom === undefined ? null : (

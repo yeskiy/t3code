@@ -1086,6 +1086,7 @@ it.effect("passes forkAgent onto turnInput and skips broken definitions", () =>
                     resolveForTask: () => Effect.undefined,
                     record: () => Effect.void,
                     forThread,
+                    describe: () => Effect.succeed([]),
                   }),
                 ),
                 Layer.mock(CheckpointService.CheckpointServiceV2)({

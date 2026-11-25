@@ -1,6 +1,6 @@
 import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@t3tools/contracts";
 // fork: Move to background RPC for one tool call.
-import { FORK_TOOL_CALL_WS_METHODS } from "@t3tools/contracts";
+import { FORK_DELEGATION_AGENTS_WS_METHODS, FORK_TOOL_CALL_WS_METHODS } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -21,6 +21,9 @@ const RPC_AGGREGATES = {
   // fork: Move to background and stop RPCs for one tool call.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: "orchestration",
   [FORK_TOOL_CALL_WS_METHODS.stop]: "orchestration",
+  // fork: delegation agent views.
+  [FORK_DELEGATION_AGENTS_WS_METHODS.list]: "orchestration",
+  [FORK_DELEGATION_AGENTS_WS_METHODS.forThread]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: "orchestration",

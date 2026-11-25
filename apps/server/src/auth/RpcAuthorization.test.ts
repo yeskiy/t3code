@@ -23,6 +23,7 @@ import {
   MessageId,
   ORCHESTRATION_V2_WS_METHODS,
   FORK_TOOL_CALL_WS_METHODS,
+  FORK_DELEGATION_AGENTS_WS_METHODS,
   RunId,
   WS_METHODS,
   WsRpcGroup,
@@ -74,6 +75,15 @@ describe("RPC authorization scopes", () => {
     );
     expect(requiredScopeForRpcMethod(FORK_TOOL_CALL_WS_METHODS.stop)).toBe(
       AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("lets a reader see delegation agents", () => {
+    expect(requiredScopeForRpcMethod(FORK_DELEGATION_AGENTS_WS_METHODS.list)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(FORK_DELEGATION_AGENTS_WS_METHODS.forThread)).toBe(
+      AuthOrchestrationReadScope,
     );
   });
 

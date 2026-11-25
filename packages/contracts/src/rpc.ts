@@ -50,6 +50,11 @@ import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 // fork: Move to background and stop RPCs for one tool call.
 import { WsForkMoveToolCallToBackgroundRpc, WsForkStopToolCallRpc } from "./forkToolCall.ts";
+// fork: delegation agent views.
+import {
+  WsForkListDelegationAgentsRpc,
+  WsForkThreadDelegationAgentRpc,
+} from "./forkDelegationAgent.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -2740,4 +2745,7 @@ export const WsRpcGroup = RpcGroup.make(
   // fork: Move to background and stop RPCs for one tool call.
   WsForkMoveToolCallToBackgroundRpc,
   WsForkStopToolCallRpc,
+  // fork: delegation agent views.
+  WsForkListDelegationAgentsRpc,
+  WsForkThreadDelegationAgentRpc,
 ).middleware(RpcScopeAuthorization);

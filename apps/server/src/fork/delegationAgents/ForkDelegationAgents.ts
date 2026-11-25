@@ -1,4 +1,4 @@
-import type { ForkTurnAgent, ServerSettings, ThreadId } from "@t3tools/contracts";
+import type { ForkAgentDetail, ForkTurnAgent, ServerSettings, ThreadId } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -53,6 +53,11 @@ export class ForkDelegationAgents extends Context.Service<
     readonly forThread: (
       threadId: ThreadId,
     ) => Effect.Effect<ForkTurnAgent | undefined, ForkAgentError>;
+    readonly describe: (input: {
+      readonly includeInstructions: boolean;
+      readonly name?: string | undefined;
+      readonly threadId?: ThreadId | undefined;
+    }) => Effect.Effect<ReadonlyArray<ForkAgentDetail>, ForkAgentError>;
   }
 >()("t3/fork/delegationAgents/ForkDelegationAgents") {}
 
@@ -199,7 +204,57 @@ export const make = Effect.fn("fork.ForkDelegationAgents.make")(function* (input
     } satisfies ForkTurnAgent;
   });
 
-  return ForkDelegationAgents.of({ list, resolveForTask, record, forThread });
+  const detailOf = (agent: ForkAgentDefinition, includeInstructions: boolean) =>
+    instructionsOf(agent).pipe(
+      Effect.map((text) => ({
+        instructionsBytes: Buffer.byteLength(text),
+        ...(includeInstructions ? { instructions: text } : {}),
+      })),
+      Effect.catch((error) => Effect.succeed({ problem: error.message })),
+      Effect.map((rendered): ForkAgentDetail => ({
+        name: agent.name,
+        description: agent.description,
+        ...(agent.provider === undefined ? {} : { provider: agent.provider }),
+        roles: [...agent.roles],
+        limits: [...agent.limits],
+        skills: [...agent.skills],
+        defaults: Object.entries(agent.defaults).map(([driver, preset]) => ({
+          driver,
+          ...(preset.model === undefined ? {} : { model: preset.model }),
+          ...(preset.effort === undefined ? {} : { effort: preset.effort }),
+        })),
+        ...rendered,
+      })),
+    );
+
+  const describe = Effect.fn("ForkDelegationAgents.describe")(function* (request: {
+    readonly includeInstructions: boolean;
+    readonly name?: string | undefined;
+    readonly threadId?: ThreadId | undefined;
+  }) {
+    const wanted =
+      request.threadId === undefined
+        ? request.name
+        : (yield* Ref.get(store))[request.threadId]?.agent;
+    if (request.threadId !== undefined && wanted === undefined) return [];
+    const agents = (yield* list).filter((agent) => wanted === undefined || agent.name === wanted);
+    if (wanted !== undefined && agents.length === 0) {
+      return [
+        {
+          name: wanted,
+          description: "",
+          roles: [],
+          limits: [],
+          skills: [],
+          defaults: [],
+          problem: `Agent ${wanted} is no longer defined.`,
+        },
+      ] satisfies ReadonlyArray<ForkAgentDetail>;
+    }
+    return yield* Effect.forEach(agents, (agent) => detailOf(agent, request.includeInstructions));
+  });
+
+  return ForkDelegationAgents.of({ list, resolveForTask, record, forThread, describe });
 });
 
 export const layer = Layer.effect(

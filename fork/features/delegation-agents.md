@@ -70,6 +70,25 @@ Child thread to agent mappings are stored in `<stateDir>\fork\delegation-agents.
 - Updated atomically on `record`, serialized by a single-permit semaphore.
 - Retains the 5,000 newest entries sorted by `at`.
 
+## Agent views
+
+The owner can see which agent a delegated child runs as, and what context that agent loads.
+
+| View                            | Where                                                                                                                                         | What it shows                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Agent badge on the subagent row | `apps/web/src/components/chat/V2LifecycleRow.tsx` (`SubagentTimelineLink`), component `apps/web/src/fork/delegationAgents/ForkAgentBadge.tsx` | The agent name beside a delegated child in the parent timeline. A click opens the details |
+| Agent badge in the child thread | Lineage heading in the thread details card (`apps/web/src/components/chat/ThreadRelationshipsControl.tsx`)                                    | The same badge for the open child thread                                                  |
+| Delegation agents list          | Settings > Providers, after "Agent integration" (`apps/web/src/fork/delegationAgents/ForkDelegationAgentsSection.tsx`)                        | One row per agent file                                                                    |
+
+The details show the description, the limits in plain words, the provider, the model the child runs on, the model defaults, the skills, and the size of the rendered agent text. "Show instructions" loads the full agent text on demand. A badge shows only for a thread that `record` stored. An agent that cannot render (a missing skill, a text over the cap) keeps its row and shows the problem.
+
+Two read-scope RPCs (`AuthOrchestrationReadScope`) serve the views:
+
+| RPC                               | Returns                                                                                                                                                                             |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fork.delegationAgents.list`      | `ForkAgentDetail` for every agent. `includeInstructions: true` adds the agent text                                                                                                  |
+| `fork.delegationAgents.forThread` | `null`, or the recorded agent of the thread with the defaults of the child's driver, plus the driver and model of the child thread. `includeInstructions: true` adds the agent text |
+
 ## Hook points
 
 | Upstream file                                                    | Hook                                                                                                                                                         |
@@ -85,6 +104,15 @@ Child thread to agent mappings are stored in `<stateDir>\fork\delegation-agents.
 | `apps/server/src/orchestration-v2/runtimeLayer.ts`               | Provide `ForkDelegationAgents.layer` to `RunExecutionService` and expose it from `layer` so `OrchestratorMcpService` shares the same memoized instance       |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`   | Pass `forkClaudeAgentParts(turnInput.forkAgent)` into `forkClaudeLaunch.resolve`                                                                             |
 | `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`    | Spread `forkCodexAgentContext(input.forkAgent)` into `additionalContext` and pass `turnInput.forkAgent` in `startNativeTurn`                                 |
+| `packages/contracts/src/rpc.ts`                                  | Add `WsForkListDelegationAgentsRpc` and `WsForkThreadDelegationAgentRpc` to the RPC group                                                                    |
+| `apps/server/src/ws.ts`                                          | Spread `forkDelegationAgentsRpcHandlers` into the handlers, with the thread model selection and the provider list                                            |
+| `apps/server/src/ws.test.ts`                                     | Provide `forkDelegationAgentsLayerEmpty`                                                                                                                     |
+| `apps/server/src/auth/RpcAuthorization.ts`                       | Read scope for the two agent view RPCs                                                                                                                       |
+| `apps/server/src/observability/RpcInstrumentation.ts`            | `orchestration` aggregate for the two agent view RPCs                                                                                                        |
+| `apps/server/src/orchestration-v2/RunExecutionService.test.ts`   | `describe` on the service mock                                                                                                                               |
+| `apps/web/src/components/chat/V2LifecycleRow.tsx`                | `ForkAgentBadge` after the subagent row of a local child                                                                                                     |
+| `apps/web/src/components/chat/ThreadRelationshipsControl.tsx`    | `ForkAgentBadge` in the Lineage section actions                                                                                                              |
+| `apps/web/src/components/settings/ProviderSettingsPanel.tsx`     | `ForkDelegationAgentsSection` after `ForkMcpScopeSection`                                                                                                    |
 | `apps/server/src/provider/agentContextBudget.json`               | Account for the `agent` field on `delegate_task` (+26 bytes)                                                                                                 |
 
 ## Turn off

@@ -35,6 +35,9 @@ export const forkDelegationAgentsLayerEmpty = Layer.succeed(
     forThread: Effect.fn("ForkDelegationAgents.forThread")(function () {
       return Effect.undefined;
     }),
+    describe: Effect.fn("ForkDelegationAgents.describe")(function () {
+      return Effect.succeed([]);
+    }),
   }),
 );
 

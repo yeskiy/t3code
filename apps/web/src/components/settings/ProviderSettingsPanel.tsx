@@ -105,6 +105,7 @@ import { useSecretSources } from "./SecretSourceInput";
 import { TextGeneratorsSettings } from "./TextGeneratorsSettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ForkMcpScopeSection } from "~/fork/mcpScope/ForkMcpScopeSection"; // fork: per-provider MCP tool scope
+import { ForkDelegationAgentsSection } from "~/fork/delegationAgents/ForkDelegationAgentsSection"; // fork: delegation agents list
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
@@ -1157,6 +1158,8 @@ export function EnvironmentProviderSettings({
         disabled={readOnly || !canWriteSettings}
         onUpdateScopes={(forkMcpScopes) => updateSettings({ forkMcpScopes })}
       />
+      {/* fork: delegation agents list */}
+      <ForkDelegationAgentsSection environmentId={environmentId} />
 
       <UsageProviderSettings
         key={environmentId}

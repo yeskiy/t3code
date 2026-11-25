@@ -52,6 +52,7 @@ const fakeAgents = (
   resolveForTask: () => Effect.undefined,
   record: () => Effect.void,
   forThread: () => Effect.undefined,
+  describe: () => Effect.succeed([]),
   ...overrides,
 });
 

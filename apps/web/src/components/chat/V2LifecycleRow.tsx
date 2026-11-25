@@ -71,6 +71,7 @@ import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
 // fork: Move to background
 import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
+import { ForkAgentBadge } from "~/fork/delegationAgents/ForkAgentBadge"; // fork: delegation agent badge
 
 export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 
@@ -607,6 +608,10 @@ function SubagentTimelineLink(props: {
           />
         </ThreadHoverCardPopup>
       </Tooltip>
+      {/* fork: delegation agent badge */}
+      {threadId !== null && remote === undefined ? (
+        <ForkAgentBadge environmentId={props.parentRef.environmentId} threadId={threadId} />
+      ) : null}
       {/* fork: Move to background */}
       {liveTurnItem !== undefined ? <ForkMoveToBackgroundButton item={liveTurnItem} /> : null}
     </div>
