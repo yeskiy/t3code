@@ -88,3 +88,5 @@ export * from "./forkDelegationAgent.ts";
 export * from "./forkInstanceLaunch.ts";
 // fork: per-instance idle process timeout
 export * from "./forkInstanceIdleTimeout.ts";
+// fork: per-instance allowed delegation targets
+export * from "./forkDelegationTargets.ts";

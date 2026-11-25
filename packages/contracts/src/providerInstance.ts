@@ -4,6 +4,8 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 // fork: per-instance idle process timeout
 import { ForkInstanceIdleTimeoutFields } from "./forkInstanceIdleTimeout.ts";
+// fork: per-instance allowed delegation targets
+import { ForkDelegationTargetsFields } from "./forkDelegationTargets.ts";
 import { SecretReference } from "./secretReference.ts";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
@@ -83,6 +85,8 @@ export const ProviderInstanceConfig = Schema.Struct({
   config: Schema.optionalKey(Schema.Unknown),
   // fork: per-instance idle process timeout
   ...ForkInstanceIdleTimeoutFields,
+  // fork: per-instance allowed delegation targets
+  ...ForkDelegationTargetsFields,
 });
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
 

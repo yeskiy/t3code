@@ -89,6 +89,9 @@ import {
 // fork: per-instance idle process timeout
 import { ForkInstanceIdleTimeoutRow } from "../../fork/instanceIdleTimeout/ForkInstanceIdleTimeoutRow";
 import { withForkInstanceIdleTimeoutMinutes } from "../../fork/instanceIdleTimeout/instanceIdleTimeout.logic";
+// fork: per-instance allowed delegation targets
+import { ForkDelegationTargetsRow } from "../../fork/delegationTargets/ForkDelegationTargetsRow";
+import { withForkAllowedDelegationTargets } from "../../fork/delegationTargets/delegationTargets.logic";
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -955,6 +958,13 @@ export function ProviderInstanceCard({
     onUpdate(withForkInstanceIdleTimeoutMinutes(instance, nextMinutes));
   };
 
+  // fork: per-instance allowed delegation targets
+  const updateAllowedDelegationTargets = (
+    nextTargets: ProviderInstanceConfig["allowedDelegationTargets"],
+  ) => {
+    onUpdate(withForkAllowedDelegationTargets(instance, nextTargets));
+  };
+
   const updateEnvironment = (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => {
     const cleaned = environment.filter((variable) => variable.name.trim().length > 0);
     const { environment: _omit, ...rest } = instance;
@@ -1373,6 +1383,15 @@ export function ProviderInstanceCard({
     />
   );
 
+  // fork: per-instance allowed delegation targets
+  const delegationTargetsRow = (
+    <ForkDelegationTargetsRow
+      idPrefix={`provider-instance-${instanceId}`}
+      value={instance.allowedDelegationTargets}
+      onCommit={updateAllowedDelegationTargets}
+    />
+  );
+
   return (
     <>
       <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
@@ -1456,6 +1475,8 @@ export function ProviderInstanceCard({
             {runtime ?? runtimeFields}
             {/* fork: per-instance idle process timeout */}
             {idleTimeoutRow}
+            {/* fork: per-instance allowed delegation targets */}
+            {delegationTargetsRow}
           </FoldedSettingsSection>
         </div>
       ) : (
@@ -1470,6 +1491,8 @@ export function ProviderInstanceCard({
             : null}
           {/* fork: per-instance idle process timeout */}
           {idleTimeoutRow}
+          {/* fork: per-instance allowed delegation targets */}
+          {delegationTargetsRow}
         </SettingsSection>
       )}
 
