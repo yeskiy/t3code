@@ -421,13 +421,18 @@ export const layer: Layer.Layer<
           (turn.runAttemptId === null || !rolledBackAttemptIds.has(turn.runAttemptId)),
       );
 
-      const snapshot =
+      const snapshot: Pick<
+        ProviderAdapter.ProviderAdapterV2ThreadSnapshot,
+        "providerThread" | "forkDroppedPrompts"
+      > =
         runsToRollback.length === 0
           ? { providerThread }
           : yield* session.rollbackThread({
               providerThread,
               target: rollbackTarget,
               providerThreadTurns,
+              // fork: rewind fallback
+              forkEarlierCursorFallback: true,
             });
       if (restoreFiles) {
         yield* checkpoints.restore({ targets: restoreTargets, scopes: [scope, ...repositories] });
@@ -458,7 +463,15 @@ export const layer: Layer.Layer<
             );
           const events: Array<OrchestrationV2DomainEvent> = [];
           // First, so a client that sees the runs rolled back already knows what was left.
-          if (input.requestId !== undefined && unrestorable.length > 0) {
+          // fork: also record stopped prompts dropped by the earlier-cursor fallback.
+          const droppedPrompts =
+            snapshot.forkDroppedPrompts !== undefined && snapshot.forkDroppedPrompts > 0
+              ? snapshot.forkDroppedPrompts
+              : null;
+          if (
+            input.requestId !== undefined &&
+            (unrestorable.length > 0 || droppedPrompts !== null)
+          ) {
             const thread = yield* projections.getThread(input.threadId);
             events.push(
               yield* makeEvent({
@@ -468,12 +481,24 @@ export const layer: Layer.Layer<
                 occurredAt: now,
                 payload: {
                   ...thread,
-                  rollbackUnrestored: {
-                    requestId: input.requestId,
-                    repositories: unrestorable.map(
-                      (repository) => repository.label ?? path.basename(repository.cwd),
-                    ),
-                  },
+                  ...(unrestorable.length > 0
+                    ? {
+                        rollbackUnrestored: {
+                          requestId: input.requestId,
+                          repositories: unrestorable.map(
+                            (repository) => repository.label ?? path.basename(repository.cwd),
+                          ),
+                        },
+                      }
+                    : {}),
+                  ...(droppedPrompts === null
+                    ? {}
+                    : {
+                        forkRollbackDroppedPrompts: {
+                          requestId: input.requestId,
+                          count: droppedPrompts,
+                        },
+                      }),
                   updatedAt: now,
                 },
               }),

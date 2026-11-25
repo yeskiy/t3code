@@ -11249,6 +11249,67 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  // fork: started prompt uuid clears a rolled-back head when interrupted before a reply.
+  it.effect("an interrupted turn whose prompt started stops resuming at the rolled-back head", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        close: (sdkMessages) => Queue.shutdown(sdkMessages),
+        freshQueueOnReopen: true,
+      });
+      const now = yield* DateTime.now;
+      const pinnedThread = {
+        ...harness.providerThread,
+        nativeConversationHeadRef: {
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeId: "00000000-0000-4000-8000-000000025510",
+          strength: "weak" as const,
+        },
+      };
+      const interruptedInput = makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: pinnedThread,
+        now,
+        attemptId: RunAttemptId.make("attempt-claude-started-interrupt-after-rollback"),
+        text: "Explain the build.",
+        attachments: [],
+        providerTurnOrdinal: 2,
+        nativeThreadHasTurns: true,
+      });
+      yield* harness.runtime.startTurn(interruptedInput);
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "command_lifecycle",
+          command_uuid: harness.promptUuid(0),
+          state: "started",
+          uuid: "00000000-0000-4000-8000-000000025521",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* harness.runtime.interruptTurn({
+        providerThread: pinnedThread,
+        providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: `turn:${interruptedInput.attemptId}`,
+        }),
+      });
+      assert.equal((yield* Queue.take(harness.terminalReceipts)).status, "interrupted");
+      const afterInterrupt = harness.events.findLast(
+        (event) => event.type === "provider_thread.updated",
+      )?.providerThread;
+      assert.isDefined(afterInterrupt);
+      assert.isNull(afterInterrupt.nativeConversationHeadRef);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect("an interrupted turn with no assistant output keeps the rolled-back head", () =>
     Effect.gen(function* () {
       const harness = yield* makeWakeHarnessWithOptions({
@@ -11305,6 +11366,184 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
       assert.equal(harness.processQueues.length, 2);
       assert.equal(harness.getOpenedOptions()?.resumeSessionAt, pinnedHead);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  // fork: started prompt uuid supports rolling back to a turn stopped before any reply.
+  it.effect(
+    "rolls back to a turn stopped after Claude started its prompt but before any reply",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({
+          close: (sdkMessages) => Queue.shutdown(sdkMessages),
+          freshQueueOnReopen: true,
+        });
+        const now = yield* DateTime.now;
+        const stoppedInput = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-stopped-before-reply"),
+          text: "Explain the build.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(stoppedInput);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: harness.promptUuid(0),
+            state: "started",
+            uuid: "00000000-0000-4000-8000-000000025520",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* harness.runtime.interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: `turn:${stoppedInput.attemptId}`,
+          }),
+        });
+        assert.equal((yield* Queue.take(harness.terminalReceipts)).status, "interrupted");
+
+        const stoppedTurn = lastProviderTurn(harness.events);
+        const rolledBack = yield* harness.runtime.rollbackThread({
+          providerThread: harness.providerThread,
+          target: {
+            type: "provider_turn",
+            checkpointId: CheckpointId.make("checkpoint-claude-stopped-before-reply"),
+            appRunOrdinal: 1,
+            providerTurn: stoppedTurn,
+            message: { role: "user", text: "Explain the build.", attachments: [] },
+          },
+          providerThreadTurns: [
+            stoppedTurn,
+            {
+              ...stoppedTurn,
+              id: ProviderTurnId.make("provider-turn-claude-after-stopped"),
+              ordinal: 2,
+              status: "completed",
+            },
+          ],
+        });
+        assert.equal(
+          rolledBack.providerThread.nativeConversationHeadRef?.nativeId,
+          harness.promptUuid(0),
+        );
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: rolledBack.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-after-stopped-rollback"),
+            text: "Try again.",
+            attachments: [],
+            providerTurnOrdinal: 2,
+            nativeThreadHasTurns: true,
+          }),
+        );
+        assert.equal(harness.getOpenedOptions()?.resumeSessionAt, harness.promptUuid(0));
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
+  // fork: earlier-cursor fallback when the caller opts in.
+  it.effect("fork: rolls back to the nearest earlier cursor when the caller opts in", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        close: (sdkMessages) => Queue.shutdown(sdkMessages),
+        freshQueueOnReopen: true,
+      });
+      const now = yield* DateTime.now;
+      const subagentUuid = "00000000-0000-4000-8000-000000000644";
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-earlier-cursor-opt-in"),
+          text: "Stopped before reply.",
+          attachments: [],
+          providerTurnOrdinal: 2,
+        }),
+      );
+      yield* Queue.offerAll(harness.sdkMessages, [
+        makeAssistantErrorFrame({
+          uuid: subagentUuid,
+          error: undefined,
+          parentToolUseId: "toolu_subagent",
+        }),
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000645", result: "Done." }),
+      ]);
+      yield* Queue.take(harness.terminalReceipts);
+
+      const syntheticTurn = lastProviderTurn(harness.events);
+      const earlierCursor = "00000000-0000-4000-8000-000000000648";
+      const turns = [
+        {
+          ...syntheticTurn,
+          id: ProviderTurnId.make("provider-turn-claude-opt-in-earlier"),
+          ordinal: 1,
+          nativeTurnRef: {
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeId: earlierCursor,
+            strength: "weak" as const,
+          },
+        },
+        syntheticTurn,
+        {
+          ...syntheticTurn,
+          id: ProviderTurnId.make("provider-turn-claude-opt-in-next"),
+          ordinal: 3,
+        },
+      ];
+
+      const rolledBack = yield* harness.runtime.rollbackThread({
+        providerThread: harness.providerThread,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-claude-opt-in-fallback"),
+          appRunOrdinal: 2,
+          providerTurn: syntheticTurn,
+          message: { role: "user", text: "Stopped before reply.", attachments: [] },
+        },
+        providerThreadTurns: turns,
+        forkEarlierCursorFallback: true,
+      });
+      assert.equal(rolledBack.providerThread.nativeConversationHeadRef?.nativeId, earlierCursor);
+      assert.equal(rolledBack.forkDroppedPrompts, 1);
+
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: rolledBack.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-opt-in-after-fallback"),
+          text: "Continue.",
+          attachments: [],
+          providerTurnOrdinal: 3,
+          nativeThreadHasTurns: true,
+        }),
+      );
+      assert.equal(harness.getOpenedOptions()?.resumeSessionAt, earlierCursor);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(

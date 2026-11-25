@@ -32,6 +32,8 @@ import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationServic
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
+// fork: real rollback failure reason.
+import { ForkRollbackFailureClientMessage } from "../fork/rewind/rollbackFailureMessage.ts";
 
 const isProviderTurnControlError = Schema.is(ProviderTurnControlService.ProviderTurnControlError);
 
@@ -117,6 +119,8 @@ export const layerExecutor: Layer.Layer<
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const settings = yield* ServerSettings.ServerSettingsService;
+    // fork: real rollback failure reason when provided by the production runtime layer.
+    const formatRollbackFailure = yield* ForkRollbackFailureClientMessage;
     const startRun = (
       effect: EffectOutbox.OrchestrationEffectV2,
       runId: RunId,
@@ -569,7 +573,7 @@ export const layerExecutor: Layer.Layer<
                           requestId: effect.commandId,
                           message: Option.match(Cause.findErrorOption(cause), {
                             onNone: () => CheckpointRollbackService.ROLLBACK_FAILED_MESSAGE,
-                            onSome: CheckpointRollbackService.rollbackFailureClientMessage,
+                            onSome: formatRollbackFailure, // fork: real rollback reason
                           }),
                         })
                         .pipe(

@@ -72,6 +72,8 @@ import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 import * as ForkToolCallControl from "../fork/ForkToolCallControl.ts";
 // fork: agent definitions
 import * as ForkDelegationAgents from "../fork/delegationAgents/ForkDelegationAgents.ts";
+// fork: real rollback failure reason.
+import { layerForkRollbackFailureClientMessage } from "../fork/rewind/rollbackFailureMessage.ts";
 
 export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationEventStore.layer,
@@ -477,4 +479,6 @@ export const layerProduction = Layer.mergeAll(
   Layer.provideMerge(layerProjectService),
   Layer.provide(Scheduler.layer),
   Layer.provideMerge(layerEventInfrastructure),
+  // fork: real rollback failure reason in production runs.
+  Layer.provide(layerForkRollbackFailureClientMessage),
 );
