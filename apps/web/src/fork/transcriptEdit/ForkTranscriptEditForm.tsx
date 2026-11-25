@@ -13,14 +13,7 @@ import { ForkTranscriptBlockField } from "./ForkTranscriptBlockField";
 import { ForkTranscriptEntryFields } from "./ForkTranscriptEntryFields";
 import { blockKey, formStep, hasEmptyText } from "./formSteps.logic";
 import type { Step } from "./history.logic";
-
-const KIND_LABEL: Record<ForkTranscriptUnitView["kind"], string> = {
-  preamble: "Preamble",
-  user: "User",
-  assistant: "Assistant",
-  tool: "Tool",
-  system: "System",
-};
+import { UNIT_KIND_LABEL } from "./pendingLooks.logic";
 
 const KIND_NOUN: Record<ForkTranscriptUnitView["kind"], string> = {
   preamble: "preamble",
@@ -49,6 +42,7 @@ export function ForkTranscriptEditForm(props: {
   readonly timestampFormat: TimestampFormat;
   readonly onStep: (step: Omit<Step, "id">) => void;
   readonly onClose: () => void;
+  readonly onInsert: (position: "above" | "below") => void;
 }) {
   const { unit } = props;
   const [texts, setTexts] = useState<ReadonlyMap<string, string>>(
@@ -73,6 +67,7 @@ export function ForkTranscriptEditForm(props: {
   const firstMovable = props.units.findIndex((candidate) => !candidate.locked);
   const canMoveUp = !unit.locked && index > 0 && index - 1 >= firstMovable;
   const canMoveDown = !unit.locked && index >= 0 && index + 1 < props.units.length;
+  const canInsert = unit.kind !== "tool" && index >= 0;
   const firstEditableIndex = unit.blocks.findIndex((block) => block.editable);
 
   const apply = () => {
@@ -110,7 +105,7 @@ export function ForkTranscriptEditForm(props: {
       onKeyDown={onKeyDown}
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{KIND_LABEL[unit.kind]}</span>
+        <span className="font-medium text-foreground">{UNIT_KIND_LABEL[unit.kind]}</span>
         {unit.time === null ? null : (
           <TimelineRowTimestamp
             createdAt={unit.time}
@@ -224,6 +219,16 @@ export function ForkTranscriptEditForm(props: {
               >
                 Move down
               </MenuItem>
+              {canInsert ? (
+                <>
+                  <MenuItem disabled={index < firstMovable} onClick={() => props.onInsert("above")}>
+                    Insert a message above
+                  </MenuItem>
+                  <MenuItem onClick={() => props.onInsert("below")}>
+                    Insert a message below
+                  </MenuItem>
+                </>
+              ) : null}
             </MenuPopup>
           </Menu>
         )}

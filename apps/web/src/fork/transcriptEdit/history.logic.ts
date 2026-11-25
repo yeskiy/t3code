@@ -93,3 +93,13 @@ export const historyReducer = (history: History, action: HistoryAction): History
 
 export const flatOps = (history: History): ReadonlyArray<ForkTranscriptPendingOp> =>
   history.steps.flatMap((step) => step.items);
+
+export const stepIndexOfOp = (steps: ReadonlyArray<Step>, opIndex: number): number =>
+  steps.reduce<{ readonly offset: number; readonly found: number }>(
+    (acc, step, index) => {
+      if (acc.found !== -1) return acc;
+      const end = acc.offset + step.items.length;
+      return opIndex < end ? { offset: end, found: index } : { offset: end, found: -1 };
+    },
+    { offset: 0, found: -1 },
+  ).found;
