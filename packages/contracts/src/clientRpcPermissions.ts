@@ -17,6 +17,8 @@ import { PeerLinkLinkPairingInput } from "./peerLink.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 // fork: Move to background RPC for one tool call.
 import { FORK_TOOL_CALL_WS_METHODS } from "./forkToolCall.ts";
+// fork: transcript edit.
+import { FORK_TRANSCRIPT_EDIT_WS_METHODS } from "./forkTranscriptEdit.ts";
 import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
@@ -91,6 +93,14 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // fork: Move to background and stop change a running turn, as Stop does.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: AuthOrchestrationOperateScope,
   [FORK_TOOL_CALL_WS_METHODS.stop]: AuthOrchestrationOperateScope,
+  // fork: transcript edit.
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.load]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.preview]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.backups]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.blockText]: AuthOrchestrationReadScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.save]: AuthOrchestrationOperateScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.restore]: AuthOrchestrationOperateScope,
+  [FORK_TRANSCRIPT_EDIT_WS_METHODS.deleteBackup]: AuthOrchestrationOperateScope,
   // An answer, a resume and a cancel each decide what a run's agents do next.
   [WS_METHODS.workflowsAnswer]: AuthOrchestrationOperateScope,
   [WS_METHODS.workflowsResume]: AuthOrchestrationOperateScope,

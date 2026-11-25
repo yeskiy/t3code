@@ -1802,6 +1802,8 @@ const OrchestrationV2TurnItemBaseFields = {
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   updatedAt: Schema.DateTimeUtc,
+  // fork: transcript edit hides an item. Absent means shown.
+  forkTranscriptHidden: Schema.optionalKey(Schema.Literal(true)),
 } as const;
 
 export const OrchestrationV2FileSearchResult = Schema.Struct({
