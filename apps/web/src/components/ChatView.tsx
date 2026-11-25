@@ -80,6 +80,12 @@ import {
   ForkStopBackgroundConfirmHost,
   openForkStopBackgroundConfirm,
 } from "~/fork/stopScope/ForkStopBackgroundConfirmHost";
+// fork: transcript edit save bar, send block, and backups dialog
+import { ForkTranscriptBackupsDialogHost } from "~/fork/transcriptEdit/ForkTranscriptBackupsDialog";
+import {
+  useForkTranscriptBannerItems,
+  useForkTranscriptSendBlock,
+} from "~/fork/transcriptEdit/forkTranscriptBannerItems";
 import { ChatBannerLane } from "./chat/ChatBannerLane";
 import * as Schema from "effect/Schema";
 import {
@@ -2801,6 +2807,13 @@ export default function ChatView(props: ChatViewProps) {
       : null,
     messages,
   );
+  // fork: transcript edit save bar and send block
+  const forkTranscriptBannerItems = useForkTranscriptBannerItems(
+    routeThreadKey,
+    isServerThread ? routeThreadRef : null,
+    legendListRef,
+  );
+  const forkTranscriptSendBlock = useForkTranscriptSendBlock(routeThreadKey);
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2908,7 +2921,7 @@ export default function ChatView(props: ChatViewProps) {
         messages,
       ),
     ];
-  })() as ComposerBannerStackItem[];
+  })().concat(forkTranscriptBannerItems) as ComposerBannerStackItem[]; // fork: transcript save bar
 
   if (
     terminalUiLaunchContext !== null &&
@@ -3945,7 +3958,8 @@ export default function ChatView(props: ChatViewProps) {
                                             ? gt("Messages loading")
                                             : worktreeSetupBlocksSend
                                               ? gt("Preparing worktree")
-                                              : projectCloneSendBlockReason
+                                              : (forkTranscriptSendBlock ??
+                                                projectCloneSendBlockReason) // fork: transcript edit
                                 }
                                 isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                                 bannerItems={
@@ -4355,6 +4369,12 @@ export default function ChatView(props: ChatViewProps) {
       {embedded ? null : <LinkPullRequestDialogHost />}
       <ThreadVisitWatermark threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />
+      {/* fork: transcript backups dialog */}
+      <ForkTranscriptBackupsDialogHost
+        threadKey={routeThreadKey}
+        threadRef={isServerThread ? routeThreadRef : null}
+        timestampFormat={timestampFormat}
+      />
     </div>
   );
   return (

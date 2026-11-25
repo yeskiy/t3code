@@ -325,7 +325,7 @@ export const useForkTranscriptRowState = (
 
 const isForkTranscriptEditError = Schema.is(ForkTranscriptEditError);
 
-const toEditError = (
+export const toEditError = (
   cause: Cause.Cause<unknown>,
   fallbackCode: ForkTranscriptEditError["code"],
 ): ForkTranscriptEditError => {
