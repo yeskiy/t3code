@@ -102,6 +102,8 @@ git push origin fork/main:main
 
 After pushing an upstream merge, check whether upstream added any new workflow files and disable them on `yeskiy/t3code`.
 
+Upstream can fix something that a fork change also fixes. Then keep the upstream code. Remove the fork change, its tests, and its row in the table above. Check each sync for such overlaps: a conflict in a fork hook file is the usual sign.
+
 ## Version scheme and auto-update
 
 Fork releases use the version format `0.1.<P>-fork.<N>` on the `latest` (stable) channel:
