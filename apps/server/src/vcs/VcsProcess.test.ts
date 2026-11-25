@@ -198,6 +198,56 @@ describe("VcsProcess.run", () => {
     }),
   );
 
+  // fork: a new worktree's background index swap holds index.lock for a moment.
+  it.effect.each([
+    {
+      stderr: "fatal: Unable to create '/private/repo/.git/index.lock': File exists.\n",
+      attempts: 2,
+      restored: true,
+    },
+    {
+      stderr: 'error: open("/private/repo/file"): No such file or directory\n',
+      attempts: 1,
+      restored: false,
+    },
+  ])("retries a checkpoint restore only while the index is locked: $stderr", (scenario) =>
+    Effect.gen(function* () {
+      const seen: Array<ReadonlyArray<string>> = [];
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: (input) =>
+              Effect.sync(() => {
+                seen.push(input.args);
+                return {
+                  stdout: "",
+                  stderr: seen.length === 1 ? scenario.stderr : "",
+                  code: ChildProcessSpawner.ExitCode(seen.length === 1 ? 128 : 0),
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                  stdoutInvalidUtf8: false,
+                  stderrInvalidUtf8: false,
+                };
+              }),
+          }),
+        ),
+      );
+
+      const restore = yield* service
+        .run({
+          ...baseInput,
+          operation: "GitVcsDriver.checkpoints.restoreCheckpoint",
+          args: ["restore", "--source", "HEAD", "--worktree", "--staged", "--", "."],
+        })
+        .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+      yield* TestClock.adjust("1 second");
+      expect(Exit.isSuccess(yield* Fiber.join(restore))).toBe(scenario.restored);
+      expect(seen.length).toBe(scenario.attempts);
+    }),
+  );
+
   it.effect.each([
     {
       stderr: "fatal: fsync error on '.git/objects/a5/tmp_obj_Pseg66': Operation not supported",

@@ -421,6 +421,22 @@ export const make = Effect.gen(function* () {
         }),
       );
     }
+    // fork: a rewind can recreate a worktree whose background index swap holds index.lock for a
+    // moment. Git takes that lock before it changes anything, so a retry is safe.
+    if (
+      input.command === "git" &&
+      input.operation === "GitVcsDriver.checkpoints.restoreCheckpoint" &&
+      input.onStdoutChunk === undefined
+    ) {
+      return yield* bounded.pipe(
+        Effect.retry({
+          times: 2,
+          while: (error) =>
+            error._tag === "VcsProcessExitError" && error.detail === GIT_INDEX_LOCKED_DETAIL,
+          schedule: Schedule.spaced(Duration.millis(75)),
+        }),
+      );
+    }
     const shared = input.command === "git" ? bounded : nonGitProcesses.withPermits(1)(bounded);
     const keyed = input.concurrency === undefined ? shared : keyedPermit(input.concurrency)(shared);
     // Taken first, so a background call still waiting holds no permit another call needs.

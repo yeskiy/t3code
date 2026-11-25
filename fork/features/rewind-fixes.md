@@ -41,6 +41,10 @@ When a rewind target turn has no real Claude cursor (for example, an older faile
 - Uses a small fork marker table inside SQLite instead of a settings key so the marker stays strictly per database without changing upstream settings schemas or adding a numbered persistence migration.
 - Idempotent even if re-run without the marker, and never touches `completed`, `interrupted`, or `cancelled` runs.
 
+### Part G: Retry a restore while the index is locked
+
+A rewind can recreate a removed worktree. Its background index swap holds `index.lock` for about 1 ms. `VcsProcess.run` retries a `restoreCheckpoint` Git command 2 times, 75 ms apart, only on `GIT_INDEX_LOCKED_DETAIL`.
+
 ## Hook points
 
 | Upstream file                                                       | Hook                                                                                       |
@@ -57,6 +61,7 @@ When a rewind target turn has no real Claude cursor (for example, an older faile
 | `apps/server/src/orchestration-v2/runtimeLayer.ts`                  | Provide `layerForkRollbackFailureClientMessage` in `layerProduction`                       |
 | `apps/server/src/server.ts`                                         | Run `backfillFailedRunCheckpointsOnStartup` once at startup                                |
 | `apps/web/src/components/chat/chatViewSend.ts`                      | Show the dropped-prompts toast after rewind completes                                      |
+| `apps/server/src/vcs/VcsProcess.ts`                                 | Part G: retry a checkpoint restore while a worktree index swap holds `index.lock`          |
 
 ## Turn off
 
@@ -68,3 +73,4 @@ When a rewind target turn has no real Claude cursor (for example, an older faile
 | Part D | Remove `Layer.provide(layerForkRollbackFailureClientMessage)` from `runtimeLayer.ts`                                                  |
 | Part E | Remove `notifyForkRollbackDroppedPrompts` from `chatViewSend.ts` and `forkRollbackDroppedPrompts` from `CheckpointRollbackService.ts` |
 | Part F | Remove `backfillFailedRunCheckpointsOnStartup` from `server.ts`                                                                       |
+| Part G | Remove the `restoreCheckpoint` retry branch from `VcsProcess.run` in `VcsProcess.ts`                                                  |
