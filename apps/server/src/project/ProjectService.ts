@@ -538,7 +538,7 @@ export const make = Effect.gen(function* () {
     return Option.isNone(row) ? Option.none() : Option.some(yield* hydrate(row.value));
   });
 
-  // fork: folded settings resolve project defaults from Settings only, so updates save them there too.
+  // Once project settings are folded, project defaults resolve from Settings only, where the app's editor saves them.
   const saveProjectSettings = (
     projectId: ProjectId,
     input: Pick<
