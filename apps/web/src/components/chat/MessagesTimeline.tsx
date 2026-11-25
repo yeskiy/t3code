@@ -1422,7 +1422,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           <AudioPreviewUnmountContext value={onAudioUnmount}>
             {/* fork: transcript edit */}
             <ForkTranscriptRowFrame row={item}>
-              <TimelineRowContent row={item} />
+              {(row) => <TimelineRowContent row={row} />}
             </ForkTranscriptRowFrame>
           </AudioPreviewUnmountContext>
         </div>

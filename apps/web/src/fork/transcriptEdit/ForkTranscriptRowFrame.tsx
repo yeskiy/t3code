@@ -6,84 +6,130 @@ import { TimelineRowCtx } from "~/components/chat/timelineRowContext";
 import {
   forkTranscriptEditSessionAtom,
   type ForkTranscriptEditSession,
-  useForkTranscriptEditActions,
   useForkTranscriptEditSession,
   useForkTranscriptRowState,
 } from "./editSession";
-import { ForkTranscriptEditForm } from "./ForkTranscriptEditForm";
+import { ForkTranscriptChangeMarker } from "./ForkTranscriptChangeMarker";
+import { ForkTranscriptDraftRow } from "./ForkTranscriptDraftRow";
+import { ForkTranscriptInsertComposer } from "./ForkTranscriptInsertComposer";
+import { ForkTranscriptRemovedRow } from "./ForkTranscriptRemovedRow";
+import { ForkTranscriptUnitForm } from "./ForkTranscriptUnitForm";
+import type { RowLook } from "./pendingLooks.logic";
+import {
+  forkTranscriptInsertTargetAtom,
+  type InsertTarget,
+  useForkTranscriptInsertTarget,
+  useForkTranscriptRowLook,
+} from "./pendingState";
+import type { DraftAnchor } from "./rowChanges.logic";
 import { useForkTranscriptEditEnabled } from "./transcriptEditSetting";
 
 /** The id of the timeline row that renders the current subtree. */
 export const ForkTranscriptRowIdCtx = createContext<string | null>(null);
-
-const EDIT_BUTTON_SELECTOR = "[data-fork-transcript-edit-button]";
-
-const focusEditButton = (rowId: string) =>
-  requestAnimationFrame(() =>
-    document
-      .querySelector<HTMLElement>(
-        `[data-timeline-row-id="${CSS.escape(rowId)}"] ${EDIT_BUTTON_SELECTOR}`,
-      )
-      ?.focus(),
-  );
 
 function ForkTranscriptRowForms(props: {
   readonly threadKey: string;
   readonly rowId: string;
   readonly unitKeys: ReadonlyArray<string>;
 }) {
-  const ctx = use(TimelineRowCtx);
   const session = useForkTranscriptEditSession(props.threadKey);
-  const actions = useForkTranscriptEditActions(props.threadKey, ctx.threadRef);
   const units = session.preview?.units ?? session.load?.units ?? [];
-  if (session.load === null || ctx.threadRef === null) return null;
-  const { load } = session;
-  const threadRef = ctx.threadRef;
   return props.unitKeys
     .filter((key) => session.openUnitKeys.has(key))
     .flatMap((key) => {
       const unit = units.find((candidate) => candidate.key === key);
-      if (unit === undefined) return [];
-      const close = () => {
-        actions.closeUnit(key, props.rowId);
-        focusEditButton(props.rowId);
-      };
-      return [
-        <div key={key} className="pb-4">
-          <ForkTranscriptEditForm
-            unit={unit}
-            units={units}
-            inherited={load.links.some((link) => link.unitKey === key && link.inherited)}
-            baseKey={load.baseKey}
-            threadRef={threadRef}
-            timestampFormat={ctx.timestampFormat}
-            onStep={actions.addStep}
-            onClose={close}
-          />
-        </div>,
-      ];
+      return unit === undefined
+        ? []
+        : [<ForkTranscriptUnitForm key={key} rowId={props.rowId} unit={unit} />];
     });
+}
+
+const withPreviewText = (row: MessagesTimelineRow, look: RowLook): MessagesTimelineRow =>
+  row.kind === "message" && look.kind === "marker" && look.previewText !== null
+    ? { ...row, message: { ...row.message, text: look.previewText } }
+    : row;
+
+function RowBody(props: {
+  readonly row: MessagesTimelineRow;
+  readonly look: RowLook;
+  readonly render: (row: MessagesTimelineRow) => ReactNode;
+}) {
+  const { row, look } = props;
+  const previewRow = withPreviewText(row, look);
+  if (look.kind === "removed") {
+    return row.kind === "assistant-meta" ? null : <ForkTranscriptRemovedRow look={look} />;
+  }
+  if (look.kind === "plain") return props.render(row);
+  return (
+    <ForkTranscriptChangeMarker
+      badge={row.kind === "assistant-meta" ? null : look.badge}
+      tone={look.tone}
+      step={look.step}
+      failure={look.failure}
+      align={row.kind === "message" && row.message.role === "user" ? "end" : "start"}
+    >
+      {props.render(previewRow)}
+    </ForkTranscriptChangeMarker>
+  );
+}
+
+function Drafts(props: {
+  readonly drafts: ReadonlyArray<DraftAnchor>;
+  readonly rowId: string;
+  readonly insert: InsertTarget | null;
+}) {
+  const composer = (position: InsertTarget["position"], unitKey: string) =>
+    props.insert?.position === position && props.insert.unitKey === unitKey ? (
+      <ForkTranscriptInsertComposer target={props.insert} />
+    ) : null;
+  return props.drafts.map((draft) => (
+    <div key={`${draft.change}:${draft.unit.key}`}>
+      {composer("above", draft.unit.key)}
+      <ForkTranscriptDraftRow draft={draft} rowId={props.rowId} />
+      {composer("below", draft.unit.key)}
+    </div>
+  ));
 }
 
 // The form replaces a message row. Other rows keep their content and show the form below it.
 export function ForkTranscriptRowFrame(props: {
   readonly row: MessagesTimelineRow;
-  readonly children: ReactNode;
+  readonly children: (row: MessagesTimelineRow) => ReactNode;
 }) {
+  const { row } = props;
   const ctx = use(TimelineRowCtx);
   const [enabled] = useForkTranscriptEditEnabled();
-  const state = useForkTranscriptRowState(enabled ? ctx.routeThreadKey : null, props.row);
-  const showForm = state.open && props.row.kind !== "assistant-meta";
+  const threadKey = enabled ? ctx.routeThreadKey : null;
+  const state = useForkTranscriptRowState(threadKey, row);
+  const look = useForkTranscriptRowLook(threadKey, row);
+  const insert = useForkTranscriptInsertTarget(threadKey, row.id);
+  const showForm = state.open && row.kind !== "assistant-meta";
+  const draftKeys = new Set(state.drafts.map((draft) => draft.unit.key));
+  const rowInsert = insert !== null && !draftKeys.has(insert.unitKey) ? insert : null;
   return (
-    <ForkTranscriptRowIdCtx value={props.row.id}>
-      {showForm && props.row.kind === "message" ? null : props.children}
+    <ForkTranscriptRowIdCtx value={row.id}>
+      <Drafts
+        drafts={state.drafts.filter((draft) => draft.afterUnitKey === null)}
+        rowId={row.id}
+        insert={insert}
+      />
+      {rowInsert?.position === "above" ? <ForkTranscriptInsertComposer target={rowInsert} /> : null}
+      {showForm && row.kind === "message" ? null : (
+        <RowBody row={row} look={look} render={props.children} />
+      )}
       {showForm ? (
         <ForkTranscriptRowForms
           threadKey={ctx.routeThreadKey}
-          rowId={props.row.id}
+          rowId={row.id}
           unitKeys={state.unitKeys}
         />
       ) : null}
+      {rowInsert?.position === "below" ? <ForkTranscriptInsertComposer target={rowInsert} /> : null}
+      <Drafts
+        drafts={state.drafts.filter((draft) => draft.afterUnitKey !== null)}
+        rowId={row.id}
+        insert={insert}
+      />
     </ForkTranscriptRowIdCtx>
   );
 }
@@ -91,14 +137,21 @@ export function ForkTranscriptRowFrame(props: {
 const EMPTY_ROW_IDS: ReadonlyArray<string> = [];
 const rowIdArrays = new WeakMap<ReadonlySet<string>, ReadonlyArray<string>>();
 const openRowIdsOf = (session: ForkTranscriptEditSession) => session.openRowIds;
+const insertRowIdOf = (target: InsertTarget | null) => target?.rowId ?? null;
 
-/** Row ids with an open edit form, so the list never recycles them. */
+/** Row ids with an open edit form or insert composer, so the list never recycles them. */
 export const useForkTranscriptAlwaysRenderRowIds = (threadKey: string): ReadonlyArray<string> => {
   const openRowIds = useAtomValue(forkTranscriptEditSessionAtom(threadKey), openRowIdsOf);
-  if (openRowIds.size === 0) return EMPTY_ROW_IDS;
-  const cached = rowIdArrays.get(openRowIds);
-  if (cached !== undefined) return cached;
-  const ids = [...openRowIds];
-  rowIdArrays.set(openRowIds, ids);
-  return ids;
+  const insertRowId = useAtomValue(forkTranscriptInsertTargetAtom(threadKey), insertRowIdOf);
+  const formRowIds = (() => {
+    if (openRowIds.size === 0) return EMPTY_ROW_IDS;
+    const cached = rowIdArrays.get(openRowIds);
+    if (cached !== undefined) return cached;
+    const ids = [...openRowIds];
+    rowIdArrays.set(openRowIds, ids);
+    return ids;
+  })();
+  return insertRowId === null || formRowIds.includes(insertRowId)
+    ? formRowIds
+    : [...formRowIds, insertRowId];
 };

@@ -27,6 +27,7 @@ import {
   type HistoryAction,
   historyReducer,
   type Step,
+  stepIndexOfOp,
 } from "./history.logic";
 import { type DraftAnchor, draftAnchors, type UnitChange, unitChanges } from "./rowChanges.logic";
 import { rowItemIds } from "./rowUnits.logic";
@@ -345,16 +346,6 @@ const bumpPreviewSeq = (threadKey: string): number => {
   return nextSeq;
 };
 
-const findStepIndexForOp = (steps: ReadonlyArray<Step>, opIndex: number): number =>
-  steps.reduce<{ readonly offset: number; readonly found: number }>(
-    (acc, step, index) => {
-      if (acc.found !== -1) return acc;
-      const end = acc.offset + step.items.length;
-      return opIndex < end ? { offset: end, found: index } : { offset: end, found: -1 };
-    },
-    { offset: 0, found: -1 },
-  ).found;
-
 interface EditSessionRpcClients {
   readonly load: (
     threadRef: ScopedThreadRef,
@@ -531,7 +522,7 @@ export const createForkTranscriptEditActions = (input: {
     if (failedAt === null) {
       return { kept: remaining, dropped, preview: result.value };
     }
-    const failedStepIndex = findStepIndexForOp(remaining, failedAt.index);
+    const failedStepIndex = stepIndexOfOp(remaining, failedAt.index);
     if (failedStepIndex < 0) {
       return { kept: [], dropped: [...dropped, ...remaining], preview: null };
     }

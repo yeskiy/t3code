@@ -1,22 +1,28 @@
+import type { OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+
 import type { MessagesTimelineRow } from "~/components/chat/MessagesTimeline.logic";
 
-export const rowItemIds = (row: MessagesTimelineRow): ReadonlyArray<string> => {
+export const rowProjectedItems = (
+  row: MessagesTimelineRow,
+): ReadonlyArray<OrchestrationV2ProjectedTurnItem> => {
   switch (row.kind) {
     case "message":
     case "assistant-meta":
-      return row.projectedItem === undefined ? [] : [row.projectedItem.item.id];
     case "event":
-      return row.projectedItem === undefined ? [] : [row.projectedItem.item.id];
+      return row.projectedItem === undefined ? [] : [row.projectedItem];
     case "work":
       return row.groupedEntries.flatMap((entry) =>
-        entry.projectedItem === undefined ? [] : [entry.projectedItem.item.id],
+        entry.projectedItem === undefined ? [] : [entry.projectedItem],
       );
     case "work-live":
-      return row.entry.projectedItem === undefined ? [] : [row.entry.projectedItem.item.id];
+      return row.entry.projectedItem === undefined ? [] : [row.entry.projectedItem];
     default:
       return [];
   }
 };
+
+export const rowItemIds = (row: MessagesTimelineRow): ReadonlyArray<string> =>
+  rowProjectedItems(row).map((projected) => projected.item.id);
 
 export const rowUnitKeys = (
   row: MessagesTimelineRow,
