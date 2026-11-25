@@ -62,6 +62,10 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // fork: Move to background and stop for the running tool call of the focused thread.
   "toolCall.moveToBackground",
   "toolCall.stop",
+  // fork: transcript edit Select mode, undo, and redo.
+  "forkTranscript.selectMode",
+  "forkTranscript.undo",
+  "forkTranscript.redo",
   "navigation.back",
   "navigation.forward",
   "terminal.toggle",

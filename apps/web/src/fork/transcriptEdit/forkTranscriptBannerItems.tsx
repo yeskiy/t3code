@@ -12,6 +12,7 @@ import {
   ForkTranscriptSaveBarActions,
   ForkTranscriptSaveBarValidation,
 } from "./ForkTranscriptSaveBar";
+import { ForkTranscriptSelectBar } from "./ForkTranscriptSelectBar";
 
 const FORK_TRANSCRIPT_SAVE_BAR_ID = "fork-transcript-save-bar";
 const SEND_BLOCK = "Save or discard the transcript changes to send a message.";
@@ -27,7 +28,7 @@ const useSessionFlag = (
     select,
   );
 
-// The bar shows while the thread has pending steps or the Select mode is on.
+// The bar shows while the thread has pending steps or the Select mode is on, with a Select row then.
 export const useForkTranscriptBannerItems = (
   threadKey: string | null,
   threadRef: ScopedThreadRef | null,
@@ -37,6 +38,7 @@ export const useForkTranscriptBannerItems = (
     threadKey,
     (session) => session.history.steps.length > 0 || session.selectMode,
   );
+  const selectMode = useSessionFlag(threadKey, (session) => session.selectMode);
   if (!visible || threadKey === null || threadRef === null) return EMPTY_ITEMS;
   return [
     {
@@ -52,6 +54,17 @@ export const useForkTranscriptBannerItems = (
       ),
       description: <ForkTranscriptSaveBarValidation threadKey={threadKey} />,
       actions: <ForkTranscriptSaveBarActions threadKey={threadKey} threadRef={threadRef} />,
+      ...(selectMode
+        ? {
+            children: (
+              <ForkTranscriptSelectBar
+                threadKey={threadKey}
+                threadRef={threadRef}
+                listRef={listRef}
+              />
+            ),
+          }
+        : {}),
     },
   ];
 };

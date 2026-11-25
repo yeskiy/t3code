@@ -55,6 +55,14 @@ type WhenToken =
   | { type: "lparen" }
   | { type: "rparen" };
 
+// fork: transcript edit Select mode, undo, and redo.
+const FORK_TRANSCRIPT_PENDING = "forkTranscriptPending && !terminalFocus && !editableFocus";
+const FORK_TRANSCRIPT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+z", command: "forkTranscript.undo", when: FORK_TRANSCRIPT_PENDING },
+  { key: "mod+shift+z", command: "forkTranscript.redo", when: FORK_TRANSCRIPT_PENDING },
+  { key: "mod+alt+s", command: "forkTranscript.selectMode", when: "!terminalFocus" },
+];
+
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
   // fork: Ctrl+B moves the running tool call to the background; otherwise it toggles the sidebar.
@@ -138,6 +146,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
+  // fork: transcript edit keys; the undo and redo rules apply only while changes are pending.
+  ...FORK_TRANSCRIPT_KEYBINDINGS,
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
@@ -409,37 +419,44 @@ function sameKeybindingShortcut(left: KeybindingShortcut, right: KeybindingShort
   );
 }
 
-// fork: Keep a conditional toolCall.moveToBackground rule after an unconditional sidebar.toggle
-// on the same chord, even when an older keybindings.json persisted sidebar.toggle after it.
+// fork: Keep a conditional fork rule after the base rule it overrides on the same chord,
+// even when an older keybindings.json persisted the base rule after it.
+const FORK_RULE_BASES: Partial<
+  Record<string, { readonly command: string; readonly anyWhen: boolean }>
+> = {
+  "toolCall.moveToBackground": { command: "sidebar.toggle", anyWhen: false },
+  "forkTranscript.undo": { command: "thread.undo", anyWhen: true },
+};
 function orderForkToolCallKeybindings(
   rules: ReadonlyArray<ResolvedKeybindingRule>,
 ): ResolvedKeybindingRule[] {
   const ordered = [...rules];
   for (let index = 0; index < ordered.length; index += 1) {
     const rule = ordered[index];
+    const base = rule ? FORK_RULE_BASES[rule.command] : undefined;
     if (
       !rule ||
-      rule.command !== "toolCall.moveToBackground" ||
+      base === undefined ||
       rule.whenAst === undefined ||
       (rule.whenAst.type === "identifier" && rule.whenAst.name === "false")
     ) {
       continue;
     }
-    let lastSidebarIndex = -1;
+    let lastBaseIndex = -1;
     for (let candidate = index + 1; candidate < ordered.length; candidate += 1) {
       const other = ordered[candidate];
       if (
         other &&
-        other.command === "sidebar.toggle" &&
-        other.whenAst === undefined &&
+        other.command === base.command &&
+        (base.anyWhen || other.whenAst === undefined) &&
         sameKeybindingShortcut(other.shortcut, rule.shortcut)
       ) {
-        lastSidebarIndex = candidate;
+        lastBaseIndex = candidate;
       }
     }
-    if (lastSidebarIndex !== -1) {
+    if (lastBaseIndex !== -1) {
       ordered.splice(index, 1);
-      ordered.splice(lastSidebarIndex, 0, rule);
+      ordered.splice(lastBaseIndex, 0, rule);
       index -= 1;
     }
   }

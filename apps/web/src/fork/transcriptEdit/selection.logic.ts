@@ -108,3 +108,47 @@ export const pruneSelection = (
     anchor: selection.anchor !== null && live.has(selection.anchor) ? selection.anchor : null,
   };
 };
+
+export const toggleKeys = (selection: Selection, keys: ReadonlyArray<string>): Selection => {
+  const remove = keys.length > 0 && keys.every((key) => selection.keys.has(key));
+  return {
+    keys: remove
+      ? new Set([...selection.keys].filter((key) => !keys.includes(key)))
+      : new Set([...selection.keys, ...keys]),
+    anchor: keys[0] ?? selection.anchor,
+  };
+};
+
+const spanKeys = (orderedKeys: ReadonlyArray<string>, keys: ReadonlyArray<string>) => {
+  const indexes = keys.map((key) => orderedKeys.indexOf(key)).filter((index) => index >= 0);
+  return indexes.length === 0
+    ? new Set(keys)
+    : rangeKeys(orderedKeys, Math.min(...indexes), Math.max(...indexes));
+};
+
+export const rangeSelectKeys = (
+  selection: Selection,
+  keys: ReadonlyArray<string>,
+  orderedKeys: ReadonlyArray<string>,
+): Selection =>
+  selection.anchor === null || !orderedKeys.includes(selection.anchor)
+    ? { keys: new Set(keys), anchor: keys[0] ?? null }
+    : { keys: spanKeys(orderedKeys, [selection.anchor, ...keys]), anchor: selection.anchor };
+
+// A drag over rows adds or removes every unit from the start row to the row under the pointer.
+export const paintSelection = (
+  base: Selection,
+  startKeys: ReadonlyArray<string>,
+  currentKeys: ReadonlyArray<string>,
+  orderedKeys: ReadonlyArray<string>,
+  mode: "add" | "remove",
+): Selection => {
+  const span = spanKeys(orderedKeys, [...startKeys, ...currentKeys]);
+  return {
+    keys:
+      mode === "add"
+        ? new Set([...base.keys, ...span])
+        : new Set([...base.keys].filter((key) => !span.has(key))),
+    anchor: startKeys[0] ?? base.anchor,
+  };
+};

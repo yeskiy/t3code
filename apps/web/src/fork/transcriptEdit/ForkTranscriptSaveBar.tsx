@@ -36,6 +36,7 @@ import {
   useForkTranscriptSave,
   useForkTranscriptSaveBarState,
 } from "./saveFlow";
+import { toggleForkTranscriptSelectMode } from "./transcriptEditCommands";
 
 const SAVE_BLOCKED =
   "Saving is blocked until the errors are gone. If a change caused them, revert it.";
@@ -164,6 +165,17 @@ export function ForkTranscriptSaveBarActions(props: {
       >
         <Redo2Icon />
       </IconAction>
+      {session.selectMode ? null : (
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() =>
+            void toggleForkTranscriptSelectMode(registry, props.threadKey, props.threadRef)
+          }
+        >
+          Select
+        </Button>
+      )}
       <Button
         size="xs"
         variant="outline"

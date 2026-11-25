@@ -3,6 +3,12 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 import { msg } from "gt-react";
 
 import { m, type MessageResolver } from "../i18n/messages";
+// fork: transcript edit menu items
+import {
+  forkTranscriptMenuItems,
+  type ForkTranscriptMenuId,
+  type ForkTranscriptMenuState,
+} from "../fork/transcriptEdit/threadMenu.logic";
 
 export type ThreadActionMenuId =
   | "find"
@@ -30,7 +36,8 @@ export type ThreadActionMenuId =
   | "copy-thread"
   | "copy-thread-id"
   | "archive"
-  | "delete";
+  | "delete"
+  | ForkTranscriptMenuId; // fork: transcript edit
 
 export type DraftActionMenuId =
   | "copy"
@@ -127,6 +134,7 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  readonly forkTranscript?: ForkTranscriptMenuState | null; // fork: transcript edit
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -310,6 +318,7 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: resolve(msg("Project settings")), icon: "settings" },
+    ...forkTranscriptMenuItems(state.forkTranscript), // fork: transcript edit
     {
       id: "archive",
       label: resolve(msg("Archive thread")),

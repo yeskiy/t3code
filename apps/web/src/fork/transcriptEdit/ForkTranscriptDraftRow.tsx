@@ -12,6 +12,7 @@ import {
   ForkTranscriptChangeMarker,
 } from "./ForkTranscriptChangeMarker";
 import { ForkTranscriptPreviewContent } from "./ForkTranscriptPreviewContent";
+import { ForkTranscriptRemovedRow } from "./ForkTranscriptRemovedRow";
 import { ForkTranscriptUnitForm } from "./ForkTranscriptUnitForm";
 import { draftBadge, newestStepFor } from "./pendingLooks.logic";
 import { type DraftAnchor, unitChanges } from "./rowChanges.logic";
@@ -51,8 +52,23 @@ export function ForkTranscriptDraftRow(props: {
   if (session.openUnitKeys.has(unit.key)) {
     return <ForkTranscriptUnitForm rowId={props.rowId} unit={unit} />;
   }
-  const badge = draftBadge(change, unit.key, unitChanges(session.preview?.diff ?? []));
   const step = newestStepFor(session.history.steps, [unit.key]);
+  if (change === "removed") {
+    return (
+      <ForkTranscriptRemovedRow
+        look={{
+          kind: "removed",
+          badge: "Removed",
+          label: `Not shown in the timeline: ${unit.kind} entry`,
+          excerpt: unit.excerpt,
+          movesAfter: null,
+          step,
+          restore: { kind: "units", unitKeys: [unit.key] },
+        }}
+      />
+    );
+  }
+  const badge = draftBadge(change, unit.key, unitChanges(session.preview?.diff ?? []));
   const openForm = () => actions.openUnit(unit.key, props.rowId);
 
   if (change === "fileOnly") {

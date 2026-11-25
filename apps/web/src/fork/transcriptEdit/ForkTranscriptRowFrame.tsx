@@ -13,6 +13,7 @@ import { ForkTranscriptChangeMarker } from "./ForkTranscriptChangeMarker";
 import { ForkTranscriptDraftRow } from "./ForkTranscriptDraftRow";
 import { ForkTranscriptInsertComposer } from "./ForkTranscriptInsertComposer";
 import { ForkTranscriptRemovedRow } from "./ForkTranscriptRemovedRow";
+import { ForkTranscriptSelectable, type SelectedState } from "./ForkTranscriptRowCheckbox";
 import { ForkTranscriptUnitForm } from "./ForkTranscriptUnitForm";
 import type { RowLook } from "./pendingLooks.logic";
 import {
@@ -73,7 +74,32 @@ function RowBody(props: {
   );
 }
 
+const NO_KEYS: ReadonlyArray<string> = [];
+
+function DraftSelectable(props: {
+  readonly threadKey: string;
+  readonly draft: DraftAnchor;
+  readonly rowId: string;
+}) {
+  const { unit, change } = props.draft;
+  const session = useForkTranscriptEditSession(props.threadKey);
+  const keys = change === "removed" ? NO_KEYS : [unit.key];
+  return (
+    <ForkTranscriptSelectable
+      active={session.selectMode}
+      itemId={`draft:${unit.key}`}
+      rowId={props.rowId}
+      unitKeys={keys}
+      selectableKeys={unit.locked ? NO_KEYS : keys}
+      selected={session.selection.keys.has(unit.key) ? "all" : "none"}
+    >
+      <ForkTranscriptDraftRow draft={props.draft} rowId={props.rowId} />
+    </ForkTranscriptSelectable>
+  );
+}
+
 function Drafts(props: {
+  readonly threadKey: string;
   readonly drafts: ReadonlyArray<DraftAnchor>;
   readonly rowId: string;
   readonly insert: InsertTarget | null;
@@ -85,7 +111,7 @@ function Drafts(props: {
   return props.drafts.map((draft) => (
     <div key={`${draft.change}:${draft.unit.key}`}>
       {composer("above", draft.unit.key)}
-      <ForkTranscriptDraftRow draft={draft} rowId={props.rowId} />
+      <DraftSelectable threadKey={props.threadKey} draft={draft} rowId={props.rowId} />
       {composer("below", draft.unit.key)}
     </div>
   ));
@@ -106,26 +132,45 @@ export function ForkTranscriptRowFrame(props: {
   const showForm = state.open && row.kind !== "assistant-meta";
   const draftKeys = new Set(state.drafts.map((draft) => draft.unit.key));
   const rowInsert = insert !== null && !draftKeys.has(insert.unitKey) ? insert : null;
+  // A removed look and the meta row under an assistant message take no checkbox.
+  const rowKeys =
+    look.kind === "removed" || row.kind === "assistant-meta" ? NO_KEYS : state.unitKeys;
+  const selected: SelectedState = rowKeys.length === 0 ? "none" : state.selected;
   return (
     <ForkTranscriptRowIdCtx value={row.id}>
       <Drafts
+        threadKey={ctx.routeThreadKey}
         drafts={state.drafts.filter((draft) => draft.afterUnitKey === null)}
         rowId={row.id}
         insert={insert}
       />
-      {rowInsert?.position === "above" ? <ForkTranscriptInsertComposer target={rowInsert} /> : null}
-      {showForm && row.kind === "message" ? null : (
-        <RowBody row={row} look={look} render={props.children} />
-      )}
-      {showForm ? (
-        <ForkTranscriptRowForms
-          threadKey={ctx.routeThreadKey}
-          rowId={row.id}
-          unitKeys={state.unitKeys}
-        />
+      {rowInsert?.position === "above" ? (
+        <ForkTranscriptInsertComposer target={rowInsert} rowUnitKeys={state.unitKeys} />
       ) : null}
-      {rowInsert?.position === "below" ? <ForkTranscriptInsertComposer target={rowInsert} /> : null}
+      <ForkTranscriptSelectable
+        active={threadKey !== null && state.selectMode}
+        itemId={`row:${row.id}`}
+        rowId={row.id}
+        unitKeys={rowKeys}
+        selectableKeys={rowKeys.length === 0 ? NO_KEYS : state.selectableKeys}
+        selected={selected}
+      >
+        {showForm && row.kind === "message" ? null : (
+          <RowBody row={row} look={look} render={props.children} />
+        )}
+        {showForm ? (
+          <ForkTranscriptRowForms
+            threadKey={ctx.routeThreadKey}
+            rowId={row.id}
+            unitKeys={state.unitKeys}
+          />
+        ) : null}
+      </ForkTranscriptSelectable>
+      {rowInsert?.position === "below" ? (
+        <ForkTranscriptInsertComposer target={rowInsert} rowUnitKeys={state.unitKeys} />
+      ) : null}
       <Drafts
+        threadKey={ctx.routeThreadKey}
         drafts={state.drafts.filter((draft) => draft.afterUnitKey !== null)}
         rowId={row.id}
         insert={insert}

@@ -25,15 +25,39 @@ export const unitChanges = (
 export interface DraftAnchor {
   readonly afterUnitKey: string | null;
   readonly unit: ForkTranscriptUnitView;
-  readonly change: "inserted" | "moved" | "fileOnly";
+  readonly change: "inserted" | "moved" | "fileOnly" | "removed";
 }
 
-export const draftAnchors = (input: {
-  readonly preview: ReadonlyArray<ForkTranscriptUnitView>;
+// A removed file-only unit has no row, so it keeps a draft at its base place for Restore.
+const removedFileOnlyAnchors = (input: {
+  readonly base: ReadonlyArray<ForkTranscriptUnitView>;
   readonly linkedUnitKeys: ReadonlySet<string>;
   readonly changes: ReadonlyMap<string, UnitChange>;
 }): ReadonlyArray<DraftAnchor> =>
-  input.preview.reduce<{
+  input.base.reduce<{
+    readonly lastLinked: string | null;
+    readonly anchors: ReadonlyArray<DraftAnchor>;
+  }>(
+    (acc, unit) =>
+      input.linkedUnitKeys.has(unit.key)
+        ? { lastLinked: unit.key, anchors: acc.anchors }
+        : input.changes.get(unit.key) === "removed"
+          ? {
+              lastLinked: acc.lastLinked,
+              anchors: [...acc.anchors, { afterUnitKey: acc.lastLinked, unit, change: "removed" }],
+            }
+          : acc,
+    { lastLinked: null, anchors: [] },
+  ).anchors;
+
+export const draftAnchors = (input: {
+  readonly preview: ReadonlyArray<ForkTranscriptUnitView>;
+  readonly base?: ReadonlyArray<ForkTranscriptUnitView>;
+  readonly linkedUnitKeys: ReadonlySet<string>;
+  readonly changes: ReadonlyMap<string, UnitChange>;
+}): ReadonlyArray<DraftAnchor> => [
+  ...removedFileOnlyAnchors({ ...input, base: input.base ?? [] }),
+  ...input.preview.reduce<{
     readonly lastLinked: string | null;
     readonly anchors: ReadonlyArray<DraftAnchor>;
   }>(
@@ -60,4 +84,5 @@ export const draftAnchors = (input: {
       return { lastLinked: unit.key, anchors: acc.anchors };
     },
     { lastLinked: null, anchors: [] },
-  ).anchors;
+  ).anchors,
+];

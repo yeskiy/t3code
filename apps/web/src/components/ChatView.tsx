@@ -80,8 +80,9 @@ import {
   ForkStopBackgroundConfirmHost,
   openForkStopBackgroundConfirm,
 } from "~/fork/stopScope/ForkStopBackgroundConfirmHost";
-// fork: transcript edit save bar, send block, and backups dialog
+// fork: transcript edit save bar, send block, backups dialog, and keys
 import { ForkTranscriptBackupsDialogHost } from "~/fork/transcriptEdit/ForkTranscriptBackupsDialog";
+import { useForkTranscriptCommands } from "~/fork/transcriptEdit/transcriptEditCommands";
 import {
   useForkTranscriptBannerItems,
   useForkTranscriptSendBlock,
@@ -2983,6 +2984,11 @@ export default function ChatView(props: ChatViewProps) {
   });
   const forkMoveToBackground = useForkMoveToBackgroundShortcut(); // fork: Move to background
   const forkStopToolCall = useForkStopToolCallShortcut(); // fork: Stop running tool call
+  // fork: transcript edit Select mode, undo, and redo keys
+  const forkTranscriptCommands = useForkTranscriptCommands(
+    routeThreadKey,
+    isServerThread ? routeThreadRef : null,
+  );
   useChatShortcuts({
     enabled: activeThreadId !== null && !backgroundThread,
     embedded,
@@ -3032,6 +3038,7 @@ export default function ChatView(props: ChatViewProps) {
       // fork: Ctrl+B Move to background and bindable Stop running tool call
       "toolCall.moveToBackground": ({ event }) => forkMoveToBackground(event),
       "toolCall.stop": ({ event }) => forkStopToolCall(event),
+      ...forkTranscriptCommands, // fork: transcript edit
     },
     fallback: (command) => {
       const scriptId = projectScriptIdFromCommand(command);

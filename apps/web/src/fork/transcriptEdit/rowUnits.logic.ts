@@ -14,6 +14,12 @@ export const rowProjectedItems = (
       return row.groupedEntries.flatMap((entry) =>
         entry.projectedItem === undefined ? [] : [entry.projectedItem],
       );
+    case "work-toggle":
+      return row.expanded
+        ? []
+        : (row.groupedEntries ?? []).flatMap((entry) =>
+            entry.projectedItem === undefined ? [] : [entry.projectedItem],
+          );
     case "work-live":
       return row.entry.projectedItem === undefined ? [] : [row.entry.projectedItem];
     default:

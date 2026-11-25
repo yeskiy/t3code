@@ -24,6 +24,7 @@ import {
 } from "./editSession";
 import { emptyHistory } from "./history.logic";
 import { toggleSelect } from "./selection.logic";
+import { readForkTranscriptShortcutContext } from "./transcriptEditShortcuts";
 
 const unit = (
   key: string,
@@ -363,5 +364,98 @@ describe("editSession", () => {
     // discard resets the session back to idle.
     actions.discard();
     expect(registry.get(forkTranscriptEditSessionAtom(threadKey))).toBe(emptyEditSession);
+  });
+
+  it("reports the pending changes and the Select mode of the active thread to shortcuts", () => {
+    const atom = forkTranscriptEditSessionAtom("env:shortcut-active");
+    appAtomRegistry.set(atom, {
+      ...emptyEditSession,
+      selectMode: true,
+      history: {
+        steps: [{ id: "s1", label: "Deleted message", unitKeys: ["u1"], items: [] }],
+        redo: [],
+      },
+    });
+
+    retainThreadOverlaysForThread("env:shortcut-other");
+    expect(readForkTranscriptShortcutContext()).toEqual({
+      forkTranscriptPending: false,
+      forkTranscriptSelectMode: false,
+    });
+
+    retainThreadOverlaysForThread("env:shortcut-active");
+    appAtomRegistry.set(atom, { ...appAtomRegistry.get(atom), selectMode: true });
+    expect(readForkTranscriptShortcutContext()).toEqual({
+      forkTranscriptPending: true,
+      forkTranscriptSelectMode: true,
+    });
+
+    appAtomRegistry.set(atom, emptyEditSession);
+    retainThreadOverlaysForThread(null);
+  });
+
+  it("counts only unlocked units of a row as selectable", () => {
+    const session: ForkTranscriptEditSession = {
+      ...emptyEditSession,
+      status: "ready",
+      load: {
+        ...loadResult,
+        units: [{ ...unit("u1", "user"), locked: true }, unit("a1", "assistant")],
+        links: [
+          { itemId: "item-u1", unitKey: "u1", inherited: false },
+          { itemId: "item-a1", unitKey: "a1", inherited: false },
+        ],
+      },
+      selectMode: true,
+      selection: toggleSelect({ keys: new Set(), anchor: null }, "a1"),
+    };
+    const row = {
+      kind: "work",
+      id: "row-work",
+      createdAt: "2026-11-25T10:00:00.000Z",
+      groupedEntries: [
+        { projectedItem: { item: { id: "item-u1" } } },
+        { projectedItem: { item: { id: "item-a1" } } },
+      ],
+    } as unknown as MessagesTimelineRow;
+
+    const state = selectRowState(session, row);
+    expect(state.unitKeys).toEqual(["u1", "a1"]);
+    expect(state.selectableKeys).toEqual(["a1"]);
+    expect(state.selected).toBe("all");
+  });
+
+  it("toggles the Select mode and loads the transcript when the mode starts", async () => {
+    const registry = AtomRegistry.make();
+    const threadKey = "env:select-toggle";
+    const load = vi.fn(async () => AsyncResult.success(loadResult));
+    const actions = createForkTranscriptEditActions({
+      registry,
+      threadKey,
+      threadRef: { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("t") },
+      rpc: {
+        load,
+        preview: async () =>
+          AsyncResult.success({
+            units: [],
+            validation: { errors: [], warnings: [] },
+            diff: [],
+            failedAt: null,
+          }),
+      },
+    });
+
+    actions.toggleSelectMode();
+    expect(registry.get(forkTranscriptEditSessionAtom(threadKey)).selectMode).toBe(true);
+    await vi.waitFor(() =>
+      expect(registry.get(forkTranscriptEditSessionAtom(threadKey)).status).toBe("ready"),
+    );
+    expect(load).toHaveBeenCalledTimes(1);
+
+    actions.setSelection(toggleSelect({ keys: new Set(), anchor: null }, "u1"));
+    actions.toggleSelectMode();
+    const off = registry.get(forkTranscriptEditSessionAtom(threadKey));
+    expect(off.selectMode).toBe(false);
+    expect(off.selection.keys.size).toBe(0);
   });
 });

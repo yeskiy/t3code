@@ -112,7 +112,6 @@ import {
   type TimelineRowSharedState,
   type TimelineRowActivityState,
   TimelineRowCtx,
-  TimelineRowActivityCtx,
   type WorkGroupViewState,
   type TimelineRow,
 } from "./timelineRowContext";
@@ -151,6 +150,7 @@ import {
   ForkTranscriptRowFrame,
   useForkTranscriptAlwaysRenderRowIds,
 } from "~/fork/transcriptEdit/ForkTranscriptRowFrame";
+import { ForkTranscriptTimelineRoot } from "~/fork/transcriptEdit/ForkTranscriptSelectDnd";
 
 function timelineListStateFor(identity: string): {
   readonly identity: string;
@@ -1485,7 +1485,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
     <>
       {activityAnnouncer}
       <MarkdownFindContext value={findActive}>
-        <TimelineRowActivityCtx value={activityState}>
+        {/* fork: transcript edit Select mode drag and drop and keys */}
+        <ForkTranscriptTimelineRoot
+          value={activityState}
+          threadKey={routeThreadKey}
+          viewport={timelineViewportElement}
+        >
           <TooltipScrollDismissArea
             ref={attachTimelineViewportElement}
             className="relative h-full min-h-0"
@@ -1565,7 +1570,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               }}
             />
           </TooltipScrollDismissArea>
-        </TimelineRowActivityCtx>
+        </ForkTranscriptTimelineRoot>
       </MarkdownFindContext>
     </>
   );

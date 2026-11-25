@@ -1,5 +1,7 @@
 import type { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
 
+import { readForkTranscriptShortcutContext } from "../transcriptEdit/transcriptEditShortcuts";
+
 export interface ForkMoveTarget {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -22,4 +24,7 @@ export const readForkMoveTarget = () => store.moveTarget;
 export const readForkStopTarget = () => store.stopTarget ?? store.moveTarget;
 
 // Read by resolveContext, so every shortcut resolution sees the identifier.
-export const readForkShortcutContext = () => ({ foregroundToolRunning: store.moveTarget !== null });
+export const readForkShortcutContext = () => ({
+  foregroundToolRunning: store.moveTarget !== null,
+  ...readForkTranscriptShortcutContext(),
+});

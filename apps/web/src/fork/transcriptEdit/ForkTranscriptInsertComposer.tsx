@@ -14,7 +14,10 @@ import { insertStep } from "./pendingLooks.logic";
 import { forkTranscriptInsertTargetAtom, type InsertTarget } from "./pendingState";
 
 /** A draft composer that adds one "Inserted message" step above or below a unit. */
-export function ForkTranscriptInsertComposer(props: { readonly target: InsertTarget }) {
+export function ForkTranscriptInsertComposer(props: {
+  readonly target: InsertTarget;
+  readonly rowUnitKeys?: ReadonlyArray<string>;
+}) {
   const { target } = props;
   const ctx = use(TimelineRowCtx);
   const registry = useContext(RegistryContext);
@@ -27,7 +30,14 @@ export function ForkTranscriptInsertComposer(props: { readonly target: InsertTar
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves focus into the composer once it opens
   useLayoutEffect(() => fieldRef.current?.focus(), []);
   const units = session.preview?.units ?? session.load?.units ?? [];
-  if (session.load === null || !units.some((unit) => unit.key === target.unitKey)) return null;
+  const targetUnit = units.find((unit) => unit.key === target.unitKey);
+  if (session.load === null || targetUnit === undefined) return null;
+  const edgeKey = target.position === "above" ? props.rowUnitKeys?.[0] : props.rowUnitKeys?.at(-1);
+  // A row with several units shows the composer at its edge, so a note names the real place.
+  const placeNote =
+    edgeKey === undefined || edgeKey === target.unitKey
+      ? null
+      : `${target.position === "above" ? "Goes before" : "Goes after"}: ${targetUnit.excerpt}`;
 
   const close = () => {
     registry.set(forkTranscriptInsertTargetAtom(ctx.routeThreadKey), null);
@@ -77,6 +87,11 @@ export function ForkTranscriptInsertComposer(props: { readonly target: InsertTar
             <Toggle value="user">User</Toggle>
             <Toggle value="assistant">Assistant</Toggle>
           </ToggleGroup>
+          {placeNote === null ? null : (
+            <span className="min-w-0 truncate" data-fork-transcript-insert-place="">
+              {placeNote}
+            </span>
+          )}
         </div>
         <Textarea
           ref={fieldRef}

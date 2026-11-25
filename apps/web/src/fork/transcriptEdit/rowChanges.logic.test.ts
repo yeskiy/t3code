@@ -86,4 +86,17 @@ describe("rowChanges.logic", () => {
       { afterUnitKey: "u1", unit: preview[2], change: "inserted" },
     ]);
   });
+
+  it("anchors a removed file-only unit at its base place so that it can be restored", () => {
+    const base = [unit("u1", "user"), unit("sys1", "system"), unit("a1")];
+    const preview = [unit("u1", "user"), unit("a1")];
+    const linked = new Set(["u1", "a1"]);
+    const changes = unitChanges([
+      { key: "sys1", kind: "system", status: "removed", before: "x", after: null },
+    ]);
+
+    expect(draftAnchors({ preview, base, linkedUnitKeys: linked, changes })).toEqual([
+      { afterUnitKey: "u1", unit: base[1], change: "removed" },
+    ]);
+  });
 });

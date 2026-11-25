@@ -32,6 +32,12 @@ import {
 import { type DraftAnchor, draftAnchors, type UnitChange, unitChanges } from "./rowChanges.logic";
 import { rowItemIds } from "./rowUnits.logic";
 import { emptySelection, pruneSelection, type Selection } from "./selection.logic";
+import { environmentServerConfigsAtom } from "~/state/server";
+import {
+  setForkTranscriptDriverReader,
+  setForkTranscriptSelectModeReader,
+  setForkTranscriptShortcutReader,
+} from "./transcriptEditShortcuts";
 import { forkTranscriptLoad, forkTranscriptPreview } from "./transcriptEditRpc";
 
 export interface ForkTranscriptEditSession {
@@ -54,6 +60,7 @@ export interface ForkTranscriptEditActions {
   readonly addStep: (step: Omit<Step, "id">) => void;
   readonly dispatchHistory: (action: HistoryAction) => void;
   readonly setSelectMode: (on: boolean) => void;
+  readonly toggleSelectMode: () => void;
   readonly setSelection: (next: Selection) => void;
   readonly setAfter: (after: "idle" | "continue") => void;
   readonly reload: (keepChanges: boolean) => Promise<ReadonlyArray<Step>>;
@@ -62,6 +69,7 @@ export interface ForkTranscriptEditActions {
 
 export interface ForkTranscriptRowState {
   readonly unitKeys: ReadonlyArray<string>;
+  readonly selectableKeys: ReadonlyArray<string>;
   readonly open: boolean;
   readonly selectMode: boolean;
   readonly selected: "none" | "some" | "all";
@@ -90,6 +98,7 @@ export const emptyEditSession: ForkTranscriptEditSession = {
 
 const EMPTY_ROW_STATE: ForkTranscriptRowState = {
   unitKeys: EMPTY_STRING_ARRAY,
+  selectableKeys: EMPTY_STRING_ARRAY,
   open: false,
   selectMode: false,
   selected: "none",
@@ -129,7 +138,32 @@ export const forkTranscriptEditSessionAtom = (
   return atom;
 };
 
+const activeThread: { key: string | null } = { key: null };
+
+setForkTranscriptShortcutReader(() => {
+  const atom = activeThread.key === null ? undefined : trackedSessions.get(activeThread.key);
+  const session = atom === undefined ? emptyEditSession : appAtomRegistry.get(atom);
+  return {
+    forkTranscriptPending: session.history.steps.length > 0,
+    forkTranscriptSelectMode: session.selectMode,
+  };
+});
+
+setForkTranscriptDriverReader(
+  (environmentId, instanceId) =>
+    appAtomRegistry
+      .get(environmentServerConfigsAtom)
+      .get(environmentId)
+      ?.providers.find((provider) => provider.instanceId === instanceId)?.driver ?? null,
+);
+
+setForkTranscriptSelectModeReader((threadKey) => {
+  const atom = trackedSessions.get(threadKey);
+  return atom !== undefined && appAtomRegistry.get(atom).selectMode;
+});
+
 registerThreadOverlay((activeThreadKey) => {
+  activeThread.key = activeThreadKey;
   trackedSessions.forEach((atom, threadKey) => {
     if (threadKey === activeThreadKey) return;
     openRowByUnitByThread.delete(threadKey);
@@ -155,6 +189,7 @@ registerThreadOverlay((activeThreadKey) => {
 
 interface SessionIndex {
   readonly unitKeyByItemId: ReadonlyMap<string, string>;
+  readonly lockedUnitKeys: ReadonlySet<string>;
   readonly inheritedItemIds: ReadonlySet<string>;
   readonly changes: ReadonlyMap<string, UnitChange>;
   readonly draftsByAfterKey: ReadonlyMap<string | null, ReadonlyArray<DraftAnchor>>;
@@ -175,7 +210,7 @@ const buildSessionIndex = (session: ForkTranscriptEditSession): SessionIndex => 
   const activeUnits = session.preview?.units ?? session.load?.units ?? [];
   const anchors =
     session.status === "ready" && session.load !== null
-      ? draftAnchors({ preview: activeUnits, linkedUnitKeys, changes })
+      ? draftAnchors({ preview: activeUnits, base: session.load.units, linkedUnitKeys, changes })
       : EMPTY_DRAFT_ARRAY;
 
   const draftsByAfterKey = new Map<string | null, Array<DraftAnchor>>();
@@ -197,6 +232,7 @@ const buildSessionIndex = (session: ForkTranscriptEditSession): SessionIndex => 
 
   const index: SessionIndex = {
     unitKeyByItemId,
+    lockedUnitKeys: new Set(activeUnits.flatMap((unit) => (unit.locked ? [unit.key] : []))),
     inheritedItemIds,
     changes,
     draftsByAfterKey,
@@ -224,9 +260,10 @@ const selectRowStateFromItemIds = (
   ];
 
   const open = unitKeys.some((key) => session.openUnitKeys.has(key));
-  const selectedCount = unitKeys.filter((key) => session.selection.keys.has(key)).length;
+  const selectableKeys = unitKeys.filter((key) => !index.lockedUnitKeys.has(key));
+  const selectedCount = selectableKeys.filter((key) => session.selection.keys.has(key)).length;
   const selected: ForkTranscriptRowState["selected"] =
-    selectedCount === 0 ? "none" : selectedCount === unitKeys.length ? "all" : "some";
+    selectedCount === 0 ? "none" : selectedCount === selectableKeys.length ? "all" : "some";
 
   const unitChangeList = unitKeys.map((key) => index.changes.get(key) ?? null);
   const change: UnitChange | null =
@@ -256,6 +293,7 @@ const selectRowStateFromItemIds = (
 
   return {
     unitKeys,
+    selectableKeys,
     open,
     selectMode: session.selectMode,
     selected,
@@ -290,6 +328,7 @@ export const rowStateEqual = (a: ForkTranscriptRowState, b: ForkTranscriptRowSta
     a.change === b.change &&
     a.inherited === b.inherited &&
     sameStrings(a.unitKeys, b.unitKeys) &&
+    sameStrings(a.selectableKeys, b.selectableKeys) &&
     sameDrafts(a.drafts, b.drafts));
 
 const EMPTY_ROW_STATE_ATOM = Atom.make(EMPTY_ROW_STATE).pipe(
@@ -384,6 +423,7 @@ const NOOP_ACTIONS: ForkTranscriptEditActions = {
   addStep: () => {},
   dispatchHistory: () => {},
   setSelectMode: () => {},
+  toggleSelectMode: () => {},
   setSelection: () => {},
   setAfter: () => {},
   reload: () => Promise.resolve([]),
@@ -544,6 +584,14 @@ export const createForkTranscriptEditActions = (input: {
     schedulePreview();
   };
 
+  const setSelectMode = (on: boolean): void => {
+    update((session) => ({
+      ...session,
+      selectMode: on,
+      selection: on ? session.selection : emptySelection,
+    }));
+  };
+
   return {
     ensureLoaded,
 
@@ -591,12 +639,12 @@ export const createForkTranscriptEditActions = (input: {
 
     dispatchHistory,
 
-    setSelectMode: (on) => {
-      update((session) => ({
-        ...session,
-        selectMode: on,
-        selection: on ? session.selection : emptySelection,
-      }));
+    setSelectMode,
+
+    toggleSelectMode: () => {
+      const on = !registry.get(atom).selectMode;
+      setSelectMode(on);
+      if (on) void ensureLoaded();
     },
 
     setSelection: (next) => {

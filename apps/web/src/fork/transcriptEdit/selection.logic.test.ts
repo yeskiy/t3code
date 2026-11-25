@@ -3,9 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   emptySelection,
   extendSelection,
+  paintSelection,
   pruneSelection,
   rangeSelect,
+  rangeSelectKeys,
   selectAll,
+  toggleKeys,
   toggleSelect,
 } from "./selection.logic";
 
@@ -80,5 +83,38 @@ describe("selection.logic", () => {
     const keptAnchor = pruneSelection(toggleSelect(emptySelection, "a2"), ["u1", "a2"]);
     expect([...keptAnchor.keys]).toEqual(["a2"]);
     expect(keptAnchor.anchor).toBe("a2");
+  });
+
+  it("toggleKeys selects a whole row unless every unit of it is selected", () => {
+    const some = toggleKeys(toggleSelect(emptySelection, "a2"), ["a1", "a2"]);
+    expect([...some.keys].toSorted()).toEqual(["a1", "a2"]);
+    expect(some.anchor).toBe("a1");
+
+    const none = toggleKeys(some, ["a1", "a2"]);
+    expect([...none.keys]).toEqual([]);
+    expect(none.anchor).toBe("a1");
+  });
+
+  it("rangeSelectKeys covers the anchor and every unit of the target row", () => {
+    const down = rangeSelectKeys(toggleSelect(emptySelection, "u1"), ["a2", "a3"], order);
+    expect([...down.keys]).toEqual(["u1", "a1", "a2", "a3"]);
+    expect(down.anchor).toBe("u1");
+
+    const up = rangeSelectKeys(toggleSelect(emptySelection, "a3"), ["u1", "a1"], order);
+    expect([...up.keys].toSorted()).toEqual(["a1", "a2", "a3", "u1"]);
+
+    const fresh = rangeSelectKeys(emptySelection, ["a1", "a2"], order);
+    expect([...fresh.keys]).toEqual(["a1", "a2"]);
+    expect(fresh.anchor).toBe("a1");
+  });
+
+  it("paintSelection adds or removes the rows between the start and the pointer", () => {
+    const base = toggleSelect(emptySelection, "u2");
+    const added = paintSelection(base, ["a1"], ["a3"], order, "add");
+    expect([...added.keys].toSorted()).toEqual(["a1", "a2", "a3", "u2"]);
+    expect(added.anchor).toBe("a1");
+
+    const removed = paintSelection(selectAll(order), ["a3"], ["a1"], order, "remove");
+    expect([...removed.keys]).toEqual(["u1", "u2"]);
   });
 });

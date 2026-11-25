@@ -116,4 +116,20 @@ describe("rowUnits.logic", () => {
 
     expect(rowUnitKeys(workRow, unitKeyByItemId)).toEqual(["unit-tool-1", "unit-tool-2"]);
   });
+
+  it("gives a collapsed tool group row the units of its hidden entries", () => {
+    const toggle = (expanded: boolean) =>
+      ({
+        kind: "work-toggle",
+        id: "work-toggle:w1",
+        createdAt: "2026-11-25T10:00:00.000Z",
+        groupId: "group-1",
+        hiddenCount: 2,
+        expanded,
+        groupedEntries: [workEntry("w1", "item-t1"), workEntry("w2", "item-t2")],
+      }) as unknown as MessagesTimelineRow;
+
+    expect(rowItemIds(toggle(false))).toEqual(["item-t1", "item-t2"]);
+    expect(rowItemIds(toggle(true))).toEqual([]);
+  });
 });
