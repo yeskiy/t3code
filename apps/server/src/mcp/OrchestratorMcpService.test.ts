@@ -2940,6 +2940,302 @@ You are a read-only research agent.
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  // fork: per-instance allowed delegation targets
+  it.effect(
+    "enforces allowedDelegationTargets on capabilities, local, inherited, agent-provider, and remote delegations",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "t3-fork-delegation-targets-",
+        });
+        const agentsDir = path.join(tempDir, "agents");
+        const storePath = path.join(tempDir, "fork", "delegation-agents.json");
+        yield* fs.makeDirectory(agentsDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(agentsDir, "content.md"),
+          `---
+name: content
+description: Content writing agent.
+provider: antigravity
+roles: [content]
+limits: []
+---
+
+Write content.
+`,
+        );
+        const forkAgents = yield* ForkDelegationAgents.make({
+          agentsDir,
+          storePath,
+          skillRoots: [],
+        });
+        const claudeWorkId = ProviderInstanceId.make("claudeWork");
+        const claudePersonalId = ProviderInstanceId.make("claudeAgent");
+        const blockedAllId = ProviderInstanceId.make("codex");
+        const providers: ReadonlyArray<ServerProvider> = [
+          providerSnapshot({
+            instanceId: claudeWorkId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          }),
+          providerSnapshot({
+            instanceId: claudePersonalId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          }),
+          providerSnapshot({
+            instanceId: antigravityInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "gemini-4-neon",
+          }),
+          providerSnapshot({
+            instanceId: blockedAllId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+        ];
+        const remoteDelegateCalls = yield* Ref.make(0);
+        const dispatchedTargets = yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]);
+        const makeScope = (instanceId: ProviderInstanceId): McpInvocationScope => ({
+          ...scope,
+          thread: {
+            ...scope.thread!,
+            providerInstanceId: instanceId,
+          },
+        });
+        const activeCallerInstance = yield* Ref.make<ProviderInstanceId>(claudeWorkId);
+        const layerService = OrchestratorMcpService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+              Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+              Layer.succeed(ForkDelegationAgents.ForkDelegationAgents, forkAgents),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                hasReceipt: () => Effect.succeed(false),
+                getThreadRecords: (threadId) =>
+                  Effect.gen(function* () {
+                    const callerId = yield* Ref.get(activeCallerInstance);
+                    const model = callerId === blockedAllId ? "gpt-5.4" : "claude-opus-5-5";
+                    if (threadId !== parentThreadId) {
+                      return {
+                        ...childProjection,
+                        thread: {
+                          ...childProjection.thread,
+                          id: threadId,
+                          modelSelection: { instanceId: callerId, model },
+                        },
+                      } as unknown as OrchestrationV2ThreadProjection;
+                    }
+                    return {
+                      ...parentProjection([
+                        {
+                          id: taskId,
+                          threadId: parentThreadId,
+                          origin: "app_owned",
+                          childThreadId,
+                          providerInstanceId: callerId,
+                          model,
+                          status: "running",
+                          result: null,
+                        },
+                      ]),
+                      thread: {
+                        ...parentProjection([]).thread,
+                        modelSelection: { instanceId: callerId, model },
+                      },
+                      runs: [
+                        {
+                          ...parentProjection([]).runs[0],
+                          providerInstanceId: callerId,
+                        },
+                      ],
+                    } as unknown as OrchestrationV2ThreadProjection;
+                  }),
+                dispatch: (command) =>
+                  Effect.gen(function* () {
+                    const cmd = command as {
+                      readonly modelSelection: { readonly instanceId: ProviderInstanceId };
+                    };
+                    yield* Ref.update(dispatchedTargets, (list) => [
+                      ...list,
+                      cmd.modelSelection.instanceId,
+                    ]);
+                    return {
+                      sequence: 1,
+                      storedEvents: [
+                        {
+                          event: {
+                            type: "subagent.updated",
+                            payload: {
+                              id: taskId,
+                              threadId: parentThreadId,
+                              origin: "app_owned",
+                              childThreadId,
+                              providerInstanceId: cmd.modelSelection.instanceId,
+                              model: "claude-opus-5-5",
+                              status: "running",
+                              result: null,
+                            },
+                          },
+                        },
+                      ],
+                    } as never;
+                  }),
+              }),
+              ServerSettings.layerTest({
+                providerInstances: {
+                  [claudeWorkId]: {
+                    driver: ProviderDriverKind.make("claudeAgent"),
+                    enabled: true,
+                    allowedDelegationTargets: [claudeWorkId],
+                  },
+                  [claudePersonalId]: {
+                    driver: ProviderDriverKind.make("claudeAgent"),
+                    enabled: true,
+                  },
+                  [antigravityInstanceId]: {
+                    driver: ProviderDriverKind.make("antigravity"),
+                    enabled: true,
+                  },
+                  [blockedAllId]: {
+                    driver: ProviderDriverKind.make("codex"),
+                    enabled: true,
+                    allowedDelegationTargets: [],
+                  },
+                },
+              }),
+              providerRegistryLayer(providers),
+              adapterRegistryLayer([
+                claudeWorkId,
+                claudePersonalId,
+                antigravityInstanceId,
+                blockedAllId,
+              ]),
+              Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.mock(RemoteDelegation.RemoteDelegation)({
+                delegate: () =>
+                  Ref.update(remoteDelegateCalls, (count) => count + 1).pipe(Effect.as({ taskId })),
+              }),
+              Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+            ),
+          ),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const workScope = makeScope(claudeWorkId);
+
+          // 1. Capabilities mark disallowed targets and keep allowed targets available.
+          const capabilities = yield* service.capabilities(workScope);
+          const byId = new Map(
+            capabilities.providers.map((entry) => [entry.providerInstanceId, entry]),
+          );
+          assert.isTrue(byId.get(claudeWorkId)?.canRunChildTask);
+          assert.deepEqual(byId.get(claudeWorkId)?.constraints, []);
+          assert.isFalse(byId.get(claudePersonalId)?.canRunChildTask);
+          assert.isFalse(byId.get(claudePersonalId)?.canRunCrossProviderChildTask);
+          assert.deepEqual(byId.get(claudePersonalId)?.constraints, [
+            "Not an allowed delegation target for this instance.",
+          ]);
+          assert.isFalse(byId.get(antigravityInstanceId)?.canRunChildTask);
+          assert.deepEqual(byId.get(antigravityInstanceId)?.constraints, [
+            "Not an allowed delegation target for this instance.",
+          ]);
+
+          // 2. Allowed explicit target succeeds.
+          yield* service.delegateTask(workScope, {
+            task: "Work task with explicit target.",
+            target: { providerInstanceId: claudeWorkId },
+            mode: "async",
+            clientRequestId: "fork-targets-explicit-ok",
+          });
+
+          // 3. Inherited target (omitted target) succeeds when caller is in its own list.
+          yield* service.delegateTask(workScope, {
+            task: "Work task inheriting caller.",
+            mode: "async",
+            clientRequestId: "fork-targets-inherited-ok",
+          });
+          assert.deepEqual(yield* Ref.get(dispatchedTargets), [claudeWorkId, claudeWorkId]);
+
+          // 4. Disallowed explicit target fails with invalid_request.
+          const explicitBlocked = yield* Effect.flip(
+            service.delegateTask(workScope, {
+              task: "Cross into personal Claude.",
+              target: { providerInstanceId: claudePersonalId },
+              mode: "async",
+              clientRequestId: "fork-targets-explicit-blocked",
+            }),
+          );
+          assert.equal(explicitBlocked.code, "invalid_request");
+          assert.equal(
+            explicitBlocked.message,
+            "This provider instance may delegate only to: claudeWork.",
+          );
+
+          // 5. Agent default provider outside the list fails with invalid_request.
+          const agentBlocked = yield* Effect.flip(
+            service.delegateTask(workScope, {
+              task: "Use content agent targeting antigravity.",
+              agent: "content",
+              mode: "async",
+              clientRequestId: "fork-targets-agent-blocked",
+            }),
+          );
+          assert.equal(agentBlocked.code, "invalid_request");
+          assert.equal(
+            agentBlocked.message,
+            "This provider instance may delegate only to: claudeWork.",
+          );
+
+          // 6. Remote delegation fails when the caller has a list.
+          const remoteBlocked = yield* Effect.flip(
+            service.delegateTask(workScope, {
+              task: "Delegate to remote peer.",
+              target: {
+                environmentId: EnvironmentId.make("environment:remote-peer"),
+                providerInstanceId: claudeWorkId,
+              },
+              mode: "async",
+              clientRequestId: "fork-targets-remote-blocked",
+            }),
+          );
+          assert.equal(remoteBlocked.code, "invalid_request");
+          assert.equal(
+            remoteBlocked.message,
+            "This provider instance may delegate only to: claudeWork.",
+          );
+          assert.equal(yield* Ref.get(remoteDelegateCalls), 0);
+
+          // 7. Empty list blocks even inherited self-delegation and marks all providers in capabilities.
+          yield* Ref.set(activeCallerInstance, blockedAllId);
+          const blockedScope = makeScope(blockedAllId);
+          const blockedCaps = yield* service.capabilities(blockedScope);
+          assert.isTrue(
+            blockedCaps.providers.every(
+              (entry) =>
+                !entry.canRunChildTask &&
+                entry.constraints.includes("Not an allowed delegation target for this instance."),
+            ),
+          );
+          const emptyListBlocked = yield* Effect.flip(
+            service.delegateTask(blockedScope, {
+              task: "Try self-delegation when list is empty.",
+              mode: "async",
+              clientRequestId: "fork-targets-empty-blocked",
+            }),
+          );
+          assert.equal(emptyListBlocked.code, "invalid_request");
+          assert.equal(emptyListBlocked.message, "This provider instance cannot delegate.");
+        }).pipe(Effect.provide(layerService));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects delegation to a provider without a registered adapter", () =>
     Effect.gen(function* () {
       const forkOnlyInstanceId = ProviderInstanceId.make("forkOnly");

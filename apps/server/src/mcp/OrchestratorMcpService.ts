@@ -150,6 +150,12 @@ import {
   forkAssertCanDelegate,
   forkPrepareDelegation,
 } from "../fork/delegationAgents/delegationHooks.ts";
+// fork: per-instance allowed delegation targets
+import {
+  forkAssertDelegationTargetAllowed,
+  forkAssertRemoteDelegationAllowed,
+  forkDelegationTargetConstraints,
+} from "../fork/delegationTargets/delegationTargets.ts";
 
 // Return recoverable handles before common MCP client timeouts expire.
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
@@ -2868,10 +2874,18 @@ const make = Effect.gen(function* () {
               parent.thread.projectId,
               provider.instanceId,
             );
-          const constraints = providerConstraints(
-            enabledForCaller ? provider : { ...provider, enabled: false },
-            orchestrationCapableInstanceIds.has(provider.instanceId),
-          );
+          const constraints = [
+            ...providerConstraints(
+              enabledForCaller ? provider : { ...provider, enabled: false },
+              orchestrationCapableInstanceIds.has(provider.instanceId),
+            ),
+            // fork: per-instance allowed delegation targets
+            ...forkDelegationTargetConstraints({
+              settings,
+              callerInstanceId: scope.thread?.providerInstanceId ?? inherited?.instanceId,
+              targetInstanceId: provider.instanceId,
+            }),
+          ];
           const { listed, omitted } = listCapabilityModels({
             provider,
             preferences: settings.providerModelPreferences?.[provider.instanceId],
@@ -2936,6 +2950,16 @@ const make = Effect.gen(function* () {
           callerThreadId: scope.thread.threadId,
           failure,
         });
+        // fork: per-instance allowed delegation targets
+        yield* forkAssertRemoteDelegationAllowed({
+          settings: yield* serverSettings.getSettings.pipe(
+            Effect.mapError(() =>
+              failure("orchestration_error", "Unable to read server settings."),
+            ),
+          ),
+          callerInstanceId: scope.thread.providerInstanceId,
+          failure,
+        });
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
           ...input,
@@ -2991,6 +3015,15 @@ const make = Effect.gen(function* () {
         providers,
         cwd: yield* parentWorkspaceCwd(parent),
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
+      });
+      // fork: per-instance allowed delegation targets
+      yield* forkAssertDelegationTargetAllowed({
+        settings: yield* serverSettings.getSettings.pipe(
+          Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+        ),
+        callerInstanceId: scope.thread.providerInstanceId,
+        targetInstanceId: target.modelSelection.instanceId,
+        failure,
       });
       const runtimeMode = yield* resolveRuntimeMode(
         parent.thread.runtimeMode,

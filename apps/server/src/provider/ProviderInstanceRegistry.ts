@@ -75,6 +75,8 @@ const withoutPresentation = ({
   accentColor: _accentColor,
   // fork: per-instance idle process timeout
   idleTimeoutMinutes: _idleTimeoutMinutes,
+  // fork: per-instance allowed delegation targets
+  allowedDelegationTargets: _allowedDelegationTargets,
   ...runtime
 }: ProviderInstanceConfig) => runtime;
 

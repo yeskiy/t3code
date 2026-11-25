@@ -421,6 +421,43 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  // fork: per-instance allowed delegation targets
+  it.effect("keeps the live instance when only allowedDelegationTargets changes", () =>
+    Effect.gen(function* () {
+      const closed = { count: 0 };
+      const driver: typeof CodexDriver = {
+        ...CodexDriver,
+        create: (input) =>
+          Effect.gen(function* () {
+            const instance = yield* CodexDriver.create(input);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                closed.count += 1;
+              }),
+            );
+            return instance;
+          }),
+      };
+      const instanceId = ProviderInstanceId.make("account-delegation");
+      const entry = {
+        driver: CodexDriver.driverKind,
+        enabled: false,
+        displayName: "Account Delegation",
+        config: makeCodexConfig({}),
+      };
+      const { registry, mutator } = yield* makeProviderInstanceRegistry({
+        drivers: [driver],
+        configMap: { [instanceId]: entry },
+      });
+      const instance = yield* registry.getInstance(instanceId);
+      yield* mutator.reconcile({
+        [instanceId]: { ...entry, allowedDelegationTargets: [instanceId] },
+      });
+      expect(closed.count).toBe(0);
+      expect(yield* registry.getInstance(instanceId)).toBe(instance);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("treats an explicit in-config enabled:false as disabling despite the envelope", () =>
     Effect.gen(function* () {
       const staleId = ProviderInstanceId.make("codex_stale");
