@@ -586,6 +586,15 @@ export const OrchestrationV2AppThread = Schema.Struct({
       }),
     ),
   ),
+  // fork: stopped prompts Claude no longer sees after an earlier-cursor rewind fallback.
+  forkRollbackDroppedPrompts: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        requestId: CommandId,
+        count: PositiveInt,
+      }),
+    ),
+  ),
   deletedAt: Schema.NullOr(Schema.DateTimeUtc),
 });
 export type OrchestrationV2AppThread = typeof OrchestrationV2AppThread.Type;

@@ -663,6 +663,8 @@ export interface ProviderAdapterV2ThreadSnapshot {
   readonly reasoningMessageIds?: ReadonlyArray<OrchestrationV2ConversationMessage["id"]>;
   readonly runtimeRequests: ReadonlyArray<OrchestrationV2RuntimeRequest>;
   readonly providerPayload?: unknown;
+  // fork: count of stopped prompts dropped by the earlier-cursor rewind fallback.
+  readonly forkDroppedPrompts?: number;
 }
 
 export interface ProviderAdapterV2ReadThreadSnapshotInput {
@@ -687,6 +689,8 @@ export interface ProviderAdapterV2RollbackThreadInput {
   readonly providerThread: OrchestrationV2ProviderThread;
   readonly target: ProviderAdapterV2RollbackTarget;
   readonly providerThreadTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;
+  // fork: rewind to the nearest earlier real Claude cursor when the target has none.
+  readonly forkEarlierCursorFallback?: true;
 }
 
 export interface ProviderAdapterV2ForkThreadInput {

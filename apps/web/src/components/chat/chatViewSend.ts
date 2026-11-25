@@ -49,6 +49,11 @@ import {
 } from "../ChatView.logic";
 import { readPreparedConnection } from "../../state/session";
 import { recallComposerMessage } from "./composerPromptHistory";
+// fork: dropped-prompts notice after an earlier-cursor rewind fallback.
+import {
+  notifyForkRollbackDroppedPrompts,
+  readForkRollbackDroppedPrompts,
+} from "../../fork/rewind/droppedPromptsNotice";
 
 // Kept per route so a send in flight, and the multiple-model selections, survive
 // ChatView remounting while the user navigates.
@@ -236,6 +241,10 @@ export async function rewindToMessage(input: {
         });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       },
+    );
+    // fork: notify when the earlier-cursor fallback dropped stopped prompts.
+    notifyForkRollbackDroppedPrompts(
+      readForkRollbackDroppedPrompts(input.routeThreadRef, commandId),
     );
     if (unrestored.length > 0) {
       toastManager.add({

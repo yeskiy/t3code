@@ -23,6 +23,8 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { makeInterruptResultTurnItem } from "./runInterruptResult.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+// fork: failed runs capture checkpoints too.
+import { forkRunCapturesCheckpoint } from "../fork/rewind/checkpointCapture.ts";
 
 // Git processes are already capped server-wide; this keeps one thread from taking every slot.
 const REPOSITORY_CAPTURE_CONCURRENCY = 6;
@@ -78,8 +80,8 @@ export const layer: Layer.Layer<
       const { run, rootNode, scope, providerThread, preservedCheckpointOrdinals, sideChat } =
         context;
       // Runs settle before capture; `waiting` is a run persisted before captures ran after settling.
-      const settled =
-        run?.status === "completed" || run?.status === "interrupted" || run?.status === "cancelled";
+      // fork: failed runs capture checkpoints too.
+      const settled = run !== undefined && forkRunCapturesCheckpoint(run.status);
 
       // A checkpoint on a settled run proves this at-least-once effect already committed.
       if (run !== undefined && run.checkpointId !== null && settled) {
@@ -253,12 +255,8 @@ export const layer: Layer.Layer<
             return;
           }
           const legacyWaiting = currentRun.status === "waiting";
-          if (
-            !legacyWaiting &&
-            currentRun.status !== "completed" &&
-            currentRun.status !== "interrupted" &&
-            currentRun.status !== "cancelled"
-          ) {
+          // fork: failed runs capture checkpoints too.
+          if (!legacyWaiting && !forkRunCapturesCheckpoint(currentRun.status)) {
             return;
           }
           // A Stop accepted once the provider's turn had ended stored only its request: the

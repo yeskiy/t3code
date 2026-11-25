@@ -15022,6 +15022,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           rollbackRequestId: command.commandId,
           rollbackFailure: null,
           rollbackUnrestored: null,
+          // fork: clear prior rewind dropped-prompts notice on a new rollback request.
+          forkRollbackDroppedPrompts: null,
           updatedAt: now,
         },
       });

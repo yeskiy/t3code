@@ -24,6 +24,8 @@ import {
   mergeClaudeWorkflowProgress,
   parseClaudeWorkflowRunHandles,
 } from "./claudeWorkflowProgress.ts";
+// fork: earlier-cursor rewind fallback.
+import { nearestEarlierClaudeCursor } from "../../fork/rewind/claudeCursorFallback.ts";
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { pastedUrl } from "@t3tools/shared/oauthCallback";
@@ -3215,7 +3217,10 @@ const resolveClaudeRollbackResumeSessionAt = Effect.fn(
 )(function* (input: ProviderAdapter.ProviderAdapterV2RollbackThreadInput) {
   switch (input.target.type) {
     case "thread_start":
-      return input.providerThread.nativeMetadata?.forkHeadMessageId ?? null;
+      return {
+        cursor: input.providerThread.nativeMetadata?.forkHeadMessageId ?? null,
+        droppedTurns: undefined as number | undefined,
+      };
     case "provider_turn": {
       const target = input.target;
       if (target.providerTurn.providerThreadId !== input.providerThread.id) {
@@ -3228,14 +3233,14 @@ const resolveClaudeRollbackResumeSessionAt = Effect.fn(
 
       const cursor = claudeTurnCursor(target.providerTurn);
       if (cursor !== null) {
-        return cursor;
+        return { cursor, droppedTurns: undefined as number | undefined };
       }
 
       const providerTurnsAfterTarget = input.providerThreadTurns.filter(
         (turn) => turn.ordinal > target.providerTurn.ordinal && isTerminalProviderTurn(turn),
       );
       if (providerTurnsAfterTarget.length === 0) {
-        return null;
+        return { cursor: null, droppedTurns: undefined as number | undefined };
       }
 
       // Only compaction can be omitted without dropping a retained user prompt.
@@ -3246,8 +3251,29 @@ const resolveClaudeRollbackResumeSessionAt = Effect.fn(
           .at(-1);
         const earlierCursor = earlierTurn === undefined ? null : claudeTurnCursor(earlierTurn);
         if (earlierCursor != null) {
-          return earlierCursor;
+          return { cursor: earlierCursor, droppedTurns: undefined as number | undefined };
         }
+      }
+
+      // fork: earlier-cursor fallback, opt-in per call (apps/server/src/fork/rewind/claudeCursorFallback.ts).
+      const forkFallback =
+        input.forkEarlierCursorFallback === true
+          ? nearestEarlierClaudeCursor({
+              targetTurn: target.providerTurn,
+              providerThreadTurns: input.providerThreadTurns,
+              cursorOf: claudeTurnCursor,
+            })
+          : null;
+      if (forkFallback !== null) {
+        return yield* Effect.logInfo("Claude rollback fell back to an earlier cursor", {
+          providerThreadId: input.providerThread.id,
+          droppedTurns: forkFallback.droppedTurns,
+        }).pipe(
+          Effect.as({
+            cursor: forkFallback.cursor,
+            droppedTurns: forkFallback.droppedTurns as number | undefined,
+          }),
+        );
       }
 
       return yield* new ProviderAdapter.ProviderAdapterRollbackThreadError({
@@ -5561,6 +5587,13 @@ interface ActiveClaudeTurnContext {
   executedModel: string | undefined;
 }
 
+// fork: a started prompt is in the transcript under its own uuid when no reply arrived.
+const claudeTranscriptCursor = (context: ActiveClaudeTurnContext): string | null =>
+  context.nativeMessageCursor ??
+  (context.promptStarted && context.steerUuids.size === 0 && context.input.resume !== true
+    ? context.promptUuid
+    : null);
+
 interface ActiveClaudeProviderRetry {
   readonly retry: OrchestrationV2ProviderRetry;
   readonly failure: OrchestrationV2ProviderFailure;
@@ -7594,7 +7627,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           runAttemptId: input.context.input.attemptId,
           nativeTurnRef: {
             driver: CLAUDE_PROVIDER,
-            nativeId: input.context.nativeMessageCursor ?? input.context.nativeTurnId,
+            // fork: fall back to the started prompt uuid when no assistant cursor exists.
+            nativeId: claudeTranscriptCursor(input.context) ?? input.context.nativeTurnId,
             strength: "weak",
           },
           ordinal: input.context.providerTurnOrdinal,
@@ -10261,8 +10295,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     ? []
                     : yield* owedWakeTasksForNativeThread(nativeThreadId);
                 // A stopped turn that wrote to the transcript moved past the pinned head.
+                // fork: clear the pinned head when a started prompt wrote to the transcript.
                 const clearConversationHead =
-                  (input.status === "completed" || input.context.nativeMessageCursor !== null) &&
+                  (input.status === "completed" ||
+                    claudeTranscriptCursor(input.context) !== null) &&
                   input.context.input.providerThread.nativeConversationHeadRef !== null;
                 const goal =
                   nativeThreadId === null ? undefined : goalsByNativeThread.get(nativeThreadId);
@@ -15734,7 +15770,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               // The rewound history may no longer hold the turns that carried app notes.
               deliveredAppContext.delete(nativeThreadId);
               const now = yield* DateTime.now;
-              const resumeSessionAt = yield* resolveClaudeRollbackResumeSessionAt(rollbackInput);
+              // fork: also propagate droppedTurns when the earlier-cursor fallback runs.
+              const resolvedRollback = yield* resolveClaudeRollbackResumeSessionAt(rollbackInput);
+              const resumeSessionAt = resolvedRollback.cursor;
 
               if (rollbackInput.target.type === "thread_start" && resumeSessionAt === null) {
                 const resetNativeThreadId = yield* queryRunner.allocateSessionId;
@@ -15779,6 +15817,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 },
                 messages: [],
                 runtimeRequests: [],
+                // fork: report dropped stopped prompts from the earlier-cursor fallback.
+                ...(resolvedRollback.droppedTurns === undefined
+                  ? {}
+                  : { forkDroppedPrompts: resolvedRollback.droppedTurns }),
               };
             },
             (effect, rollbackInput) =>
