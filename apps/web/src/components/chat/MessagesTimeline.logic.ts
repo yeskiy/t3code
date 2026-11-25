@@ -587,6 +587,8 @@ type MessagesTimelineRowContent =
       toolSurface?: WorkLogEntry["toolSurface"];
       toolIcon?: WorkLogEntry["toolIcon"];
       hasFailure: boolean;
+      // fork: transcript edit selects the hidden entries of a collapsed group.
+      groupedEntries?: WorkLogEntry[];
     }
   | {
       /** Images the agent opened in the tool group above, kept visible while the group is collapsed. */
@@ -2194,6 +2196,7 @@ export function deriveMessagesTimelineRows(
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),
+            groupedEntries: visibleGroupedEntries, // fork: transcript edit
           });
           if (expanded) {
             nextRows.push(

@@ -93,6 +93,8 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { ForkNewThreadDefaultRow } from "../../fork/newThreadDefault/ForkNewThreadDefaultRow";
 import { ForkArtifactsSettingRow } from "../../fork/artifacts/ForkArtifactsSettingRow"; // fork: artifacts panel
+// fork: transcript edit
+import { ForkTranscriptEditSettingRow } from "../../fork/transcriptEdit/ForkTranscriptEditSettingRow";
 import { ForkExternalOpenSection } from "../../fork/externalOpen/ForkExternalOpenSection"; // fork: external open
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -1235,6 +1237,8 @@ export function GeneralSettingsPanel() {
         />
         {/* fork: "Show renders as artifacts" row */}
         <ForkArtifactsSettingRow />
+        {/* fork: transcript edit */}
+        <ForkTranscriptEditSettingRow />
       </SettingsSection>
     </SettingsPageContainer>
   );

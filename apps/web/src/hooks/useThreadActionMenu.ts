@@ -25,6 +25,12 @@ import {
   threadActionRequiresOperate,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
+// fork: transcript edit menu items
+import {
+  isForkTranscriptMenuAction,
+  readForkTranscriptMenuState,
+  runForkTranscriptMenuAction,
+} from "../fork/transcriptEdit/threadMenu";
 import { titleRegenerationToast } from "../components/threadTitleRegenerationToast";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -158,6 +164,7 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        forkTranscript: readForkTranscriptMenuState(threadRef, thread.providerInstanceId), // fork: transcript edit
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position, source));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -200,6 +207,10 @@ export function useThreadActionMenu(input: {
           failureToast(title, squashAtomCommandFailure(result));
         }
       };
+      // fork: transcript edit Select mode and backups
+      if (isForkTranscriptMenuAction(action)) {
+        return runForkTranscriptMenuAction(action, threadRef, async () => {});
+      }
       switch (action) {
         case "find":
           onFind?.(threadRef);

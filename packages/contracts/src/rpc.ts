@@ -55,6 +55,16 @@ import {
   WsForkListDelegationAgentsRpc,
   WsForkThreadDelegationAgentRpc,
 } from "./forkDelegationAgent.ts";
+// fork: transcript edit.
+import {
+  WsForkTranscriptBackupsRpc,
+  WsForkTranscriptBlockTextRpc,
+  WsForkTranscriptDeleteBackupRpc,
+  WsForkTranscriptLoadRpc,
+  WsForkTranscriptPreviewRpc,
+  WsForkTranscriptRestoreRpc,
+  WsForkTranscriptSaveRpc,
+} from "./forkTranscriptEdit.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -2748,4 +2758,12 @@ export const WsRpcGroup = RpcGroup.make(
   // fork: delegation agent views.
   WsForkListDelegationAgentsRpc,
   WsForkThreadDelegationAgentRpc,
+  // fork: transcript edit.
+  WsForkTranscriptLoadRpc,
+  WsForkTranscriptPreviewRpc,
+  WsForkTranscriptSaveRpc,
+  WsForkTranscriptBackupsRpc,
+  WsForkTranscriptRestoreRpc,
+  WsForkTranscriptDeleteBackupRpc,
+  WsForkTranscriptBlockTextRpc,
 ).middleware(RpcScopeAuthorization);

@@ -27,6 +27,8 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { createOrchestrationV2TurnItemVisibility } from "@t3tools/shared/orchestrationV2Timeline";
 import { turnItemsSinceContextBoundary } from "./contextBoundary.ts";
 import type { ProjectionStoreV2Shape } from "./ProjectionStore.ts";
+// fork: transcript edit
+import { forkVisibleTurnItems } from "../fork/transcriptEdit/visibleItems.ts";
 
 export class ContextHandoffPrepareError extends Schema.TaggedError<ContextHandoffPrepareError>()(
   "ContextHandoffPrepareError",
@@ -143,7 +145,8 @@ export function visibleConversationItems(
     attempts: projection.attempts,
     items,
   });
-  return items.filter(visible);
+  // fork: transcript edit
+  return forkVisibleTurnItems(items.filter(visible));
 }
 
 type ForkHistorySource = Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "attempts">;
@@ -175,7 +178,11 @@ const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHis
         ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
       ],
     });
-    const bounded = turnItemsSinceContextBoundary({ runs: throughRuns, turnItems });
+    // fork: transcript edit
+    const bounded = turnItemsSinceContextBoundary({
+      runs: throughRuns,
+      turnItems: forkVisibleTurnItems(turnItems),
+    });
     return {
       items: visibleConversationItems(
         { runs: throughRuns, attempts: source.attempts },
@@ -289,6 +296,8 @@ export function makeSideChatContext(input: {
     SIDE_CHAT_CONTEXT_MAX_CHARS - [framing, "", header, truncated, "", footer].join("\n").length;
   for (let index = input.digest.length - 1; index >= 0; index--) {
     const item = input.digest[index]!;
+    // fork: transcript edit
+    if (typeof item !== "string" && item.forkTranscriptHidden === true) continue;
     const line = typeof item === "string" ? item : summarizeDeltaItem(item);
     if (line === null) continue;
     if (line.length + 1 > remaining) {
@@ -405,9 +414,15 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
                 }),
             ),
           );
-        const coverage = handoffCoverage({ ...input, coveredRunOrdinals: { from: 1, to: 1 } });
+        // fork: transcript edit
+        const items = forkVisibleTurnItems(input.items);
+        const coverage = handoffCoverage({
+          ...input,
+          items,
+          coveredRunOrdinals: { from: 1, to: 1 },
+        });
         const selected = selectHistory({
-          messages: input.items.flatMap((item) => {
+          messages: items.flatMap((item) => {
             const message = historicalMessage(item);
             return message === null ? [] : [message];
           }),
@@ -425,7 +440,7 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
           strategy: "manual_context",
           status: "ready",
           summaryMessageId: null,
-          summaryText: makeLegacyImportSummary(input.items),
+          summaryText: makeLegacyImportSummary(items),
           history: {
             messages: selected.messages,
             coverage,
@@ -471,13 +486,15 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
                 }),
             ),
           );
+        // fork: transcript edit
+        const deltaItems = forkVisibleTurnItems(input.deltaItems);
         const coverage = handoffCoverage({
           threadId: input.sourceThreadId,
           coveredRunOrdinals: input.coveredRunOrdinals,
-          items: input.deltaItems,
+          items: deltaItems,
         });
         const selected = selectHistory({
-          messages: input.deltaItems.flatMap((item) => {
+          messages: deltaItems.flatMap((item) => {
             const message = historicalMessage(item);
             return message === null ? [] : [message];
           }),
@@ -495,7 +512,7 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
           strategy: "fork_delta_summary",
           status: "ready",
           summaryMessageId: null,
-          summaryText: makeForkDeltaSummary(input),
+          summaryText: makeForkDeltaSummary({ ...input, deltaItems }),
           history: {
             messages: selected.messages,
             coverage,
@@ -548,12 +565,15 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
           ),
         );
       const runStatuses = new Map(input.runs?.map((run) => [run.id, run.status]));
+      // fork: transcript edit
+      const items = forkVisibleTurnItems(input.items);
       const coverage = handoffCoverage({
         ...input,
+        items,
         threadId: input.sourceThreadId ?? input.threadId,
       });
       const selected = selectHistory({
-        messages: input.items.flatMap((item) => {
+        messages: items.flatMap((item) => {
           const message = historicalMessage(item);
           return message === null
             ? []

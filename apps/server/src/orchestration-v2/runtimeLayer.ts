@@ -72,6 +72,8 @@ import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 import * as ForkToolCallControl from "../fork/ForkToolCallControl.ts";
 // fork: agent definitions
 import * as ForkDelegationAgents from "../fork/delegationAgents/ForkDelegationAgents.ts";
+// fork: transcript edit
+import * as ForkTranscriptEdit from "../fork/transcriptEdit/ForkTranscriptEdit.ts";
 // fork: real rollback failure reason.
 import { layerForkRollbackFailureClientMessage } from "../fork/rewind/rollbackFailureMessage.ts";
 
@@ -444,6 +446,19 @@ export const layer = Layer.mergeAll(
   ),
   // fork: agent definitions shared by RunExecutionService and OrchestratorMcpService
   ForkDelegationAgents.layer,
+  // fork: transcript edit
+  ForkTranscriptEdit.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerEventSink,
+        ThreadCommandExecutor.layer,
+        layerProviderSessionManagerProvided,
+        layerOrchestratorProvided,
+        IdAllocator.layer,
+      ),
+    ),
+  ),
 );
 
 export const layerProduction = Layer.mergeAll(

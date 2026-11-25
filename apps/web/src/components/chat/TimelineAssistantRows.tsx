@@ -15,6 +15,8 @@ import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { readResponseSubagents, useAssistantMessageText } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+// fork: transcript edit
+import { ForkEditRowButton } from "~/fork/transcriptEdit/ForkEditRowButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -228,6 +230,10 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      {/* fork: transcript edit */}
+      {message.streaming ? null : (
+        <ForkEditRowButton projectedItem={projectedItem} reveal="assistant" />
+      )}
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}

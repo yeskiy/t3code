@@ -15,6 +15,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import { setForkMoveTarget } from "./fork/toolCallBackground/foregroundToolContext";
+import { setForkTranscriptShortcutReader } from "./fork/transcriptEdit/transcriptEditShortcuts";
 import {
   effectiveShortcutsForCommand,
   formatShortcutLabel,
@@ -1216,5 +1217,69 @@ describe("Usage shortcuts", () => {
         platform: "Linux",
       }),
     );
+  });
+});
+
+describe("transcript edit shortcuts", () => {
+  const ctrlZ = event({ key: "z", ctrlKey: true });
+  const ctrlShiftZ = event({ key: "z", ctrlKey: true, shiftKey: true });
+  const ctrlAltS = event({ key: "s", ctrlKey: true, altKey: true });
+  const resolve = (
+    chord: ShortcutEventLike,
+    context: Record<string, boolean>,
+    bindings: ResolvedKeybindingsConfig = DEFAULT_RESOLVED_KEYBINDINGS,
+  ) => resolveShortcutCommand(chord, bindings, { platform: "Win32", context });
+
+  it("toggles the Select mode with Ctrl+Alt+S outside the terminal", () => {
+    assert.strictEqual(resolve(ctrlAltS, {}), "forkTranscript.selectMode");
+    assert.isNull(resolve(ctrlAltS, { terminalFocus: true }));
+  });
+
+  it("sends Ctrl+Z to the transcript only while changes are pending and no field has focus", () => {
+    assert.strictEqual(resolve(ctrlZ, { forkTranscriptPending: true }), "forkTranscript.undo");
+    assert.strictEqual(resolve(ctrlZ, { forkTranscriptPending: false }), "thread.undo");
+    assert.isNull(resolve(ctrlZ, { forkTranscriptPending: true, editableFocus: true }));
+    assert.strictEqual(resolve(ctrlShiftZ, { forkTranscriptPending: true }), "forkTranscript.redo");
+    assert.notStrictEqual(
+      resolve(ctrlShiftZ, { forkTranscriptPending: false }),
+      "forkTranscript.redo",
+    );
+  });
+
+  it("reads the pending state of the active thread from the fork store", () => {
+    setForkTranscriptShortcutReader(() => ({
+      forkTranscriptPending: true,
+      forkTranscriptSelectMode: false,
+    }));
+    try {
+      assert.strictEqual(
+        resolveShortcutCommand(ctrlZ, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Win32" }),
+        "forkTranscript.undo",
+      );
+    } finally {
+      setForkTranscriptShortcutReader(null);
+    }
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlZ, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Win32" }),
+      "thread.undo",
+    );
+  });
+
+  it("keeps the transcript undo after a persisted thread.undo rule on the same chord", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        {
+          key: "mod+z",
+          command: "forkTranscript.undo",
+          when: "forkTranscriptPending && !terminalFocus && !editableFocus",
+        },
+        { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
+      ]),
+    );
+    assert.strictEqual(
+      resolve(ctrlZ, { forkTranscriptPending: true }, bindings),
+      "forkTranscript.undo",
+    );
+    assert.strictEqual(resolve(ctrlZ, { forkTranscriptPending: false }, bindings), "thread.undo");
   });
 });

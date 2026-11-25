@@ -90,3 +90,5 @@ export * from "./forkInstanceLaunch.ts";
 export * from "./forkInstanceIdleTimeout.ts";
 // fork: per-instance allowed delegation targets
 export * from "./forkDelegationTargets.ts";
+// fork: transcript edit.
+export * from "./forkTranscriptEdit.ts";

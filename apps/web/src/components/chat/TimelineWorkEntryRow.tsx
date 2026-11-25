@@ -57,6 +57,8 @@ import { FetchedToolOutput, V2ItemInspector } from "./V2ItemInspector";
 import { SubagentNotificationLink } from "./V2LifecycleRow";
 // fork: Move to background
 import { ForkMoveToBackgroundButton } from "~/fork/toolCallBackground/ForkMoveToBackgroundButton";
+// fork: transcript edit
+import { ForkEditRowButton } from "~/fork/transcriptEdit/ForkEditRowButton";
 import {
   TimelineRowCtx,
   TimelineRowActivityCtx,
@@ -636,8 +638,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               timestampFormat={timestampFormat}
             />
           ) : null}
-          {/* fork: Move to background */}
+          {/* fork: Move to background, transcript edit */}
           <ForkMoveToBackgroundButton entry={workEntry} />
+          <ForkEditRowButton projectedItem={workEntry.projectedItem} reveal="work" />
           {createdThread ? (
             <button
               type="button"

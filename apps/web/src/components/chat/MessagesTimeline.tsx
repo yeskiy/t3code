@@ -112,7 +112,6 @@ import {
   type TimelineRowSharedState,
   type TimelineRowActivityState,
   TimelineRowCtx,
-  TimelineRowActivityCtx,
   type WorkGroupViewState,
   type TimelineRow,
 } from "./timelineRowContext";
@@ -146,6 +145,12 @@ import { useThreadFindPositionReader } from "./useThreadFindPositionReader";
 import { ThreadActivityAnnouncer } from "./ThreadActivityAnnouncer";
 import { useStableHandoffRuns, useIncrementalTimelineRows, useStableRows } from "./useTimelineRows";
 import { useClientSettings } from "../../hooks/useSettings";
+// fork: transcript edit
+import {
+  ForkTranscriptRowFrame,
+  useForkTranscriptAlwaysRenderRowIds,
+} from "~/fork/transcriptEdit/ForkTranscriptRowFrame";
+import { ForkTranscriptTimelineRoot } from "~/fork/transcriptEdit/ForkTranscriptSelectDnd";
 
 function timelineListStateFor(identity: string): {
   readonly identity: string;
@@ -893,7 +898,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // last messages mounted lets heading navigation wrap to either end.
   const firstMessageRow = rows.find(isMessageRow);
   const lastMessageRow = rows.findLast(isMessageRow);
+  const forkOpenRowIds = useForkTranscriptAlwaysRenderRowIds(routeThreadKey); // fork: transcript edit
   const alwaysRenderKeys = [
+    ...forkOpenRowIds,
     ...(firstMessageRow ? [firstMessageRow.id] : []),
     ...(lastMessageRow && lastMessageRow !== firstMessageRow ? [lastMessageRow.id] : []),
     ...(citationAlwaysRender?.keys ?? []),
@@ -1413,7 +1420,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
           data-timeline-root="true"
         >
           <AudioPreviewUnmountContext value={onAudioUnmount}>
-            <TimelineRowContent row={item} />
+            {/* fork: transcript edit */}
+            <ForkTranscriptRowFrame row={item}>
+              {(row) => <TimelineRowContent row={row} />}
+            </ForkTranscriptRowFrame>
           </AudioPreviewUnmountContext>
         </div>
       </div>
@@ -1475,7 +1485,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
     <>
       {activityAnnouncer}
       <MarkdownFindContext value={findActive}>
-        <TimelineRowActivityCtx value={activityState}>
+        {/* fork: transcript edit Select mode drag and drop and keys */}
+        <ForkTranscriptTimelineRoot
+          value={activityState}
+          threadKey={routeThreadKey}
+          viewport={timelineViewportElement}
+        >
           <TooltipScrollDismissArea
             ref={attachTimelineViewportElement}
             className="relative h-full min-h-0"
@@ -1555,7 +1570,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               }}
             />
           </TooltipScrollDismissArea>
-        </TimelineRowActivityCtx>
+        </ForkTranscriptTimelineRoot>
       </MarkdownFindContext>
     </>
   );

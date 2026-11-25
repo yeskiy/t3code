@@ -183,6 +183,12 @@ import {
   isThreadTriageAction,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
+// fork: transcript edit menu items
+import {
+  isForkTranscriptMenuAction,
+  readForkTranscriptMenuState,
+  runForkTranscriptMenuAction,
+} from "~/fork/transcriptEdit/threadMenu";
 import {
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
@@ -2750,6 +2756,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               ),
               canTurnIntoProject: canTurnThreadIntoProject(threadRef),
               canRename: !fromSearch,
+              forkTranscript: readForkTranscriptMenuState(threadRef, thread.providerInstanceId), // fork: transcript edit
               supports: {
                 settlement: configLoaded,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2781,6 +2788,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 );
           if (preset) attemptSnooze(threadRef, preset);
           return;
+        }
+        // fork: transcript edit Select mode and backups open the thread first
+        if (isForkTranscriptMenuAction(clicked.value)) {
+          return runForkTranscriptMenuAction(clicked.value, threadRef, () =>
+            navigateToThread(threadRef),
+          );
         }
         switch (clicked.value) {
           case "filter-by-project":

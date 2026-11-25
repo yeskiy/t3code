@@ -88,4 +88,27 @@ describe("buildThreadActionMenuItems", () => {
     const items = buildThreadActionMenuItems({ ...baseState, canRename: false });
     expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(["rename"]);
   });
+
+  // fork: transcript edit menu items
+  it("adds the transcript edit items for a Claude thread after the thread items", () => {
+    const ids = (forkTranscript: { readonly selectMode: boolean } | null) =>
+      buildThreadActionMenuItems({ ...baseState, forkTranscript }).map((item) => item.id);
+    expect(ids(null)).not.toContain("fork-transcript-select");
+
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      forkTranscript: { selectMode: false },
+    });
+    const at = items.findIndex((item) => item.id === "fork-transcript-select");
+    expect(items.slice(at, at + 2).map((item) => item.label)).toEqual([
+      "Select messages",
+      "Transcript backups",
+    ]);
+    expect(items[at - 1]?.id).toBe("project-settings");
+    expect(
+      buildThreadActionMenuItems({ ...baseState, forkTranscript: { selectMode: true } }).find(
+        (item) => item.id === "fork-transcript-select",
+      )?.label,
+    ).toBe("Stop selecting");
+  });
 });

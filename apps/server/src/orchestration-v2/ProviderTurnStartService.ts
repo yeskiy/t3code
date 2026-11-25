@@ -53,6 +53,8 @@ import type * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
+// fork: transcript edit
+import { forkVisibleTurnItems } from "../fork/transcriptEdit/visibleItems.ts";
 import { canForkBusySourceNatively, isActiveRun } from "./CommandPolicy.ts";
 import { contextBoundaryOrdinal, isScheduledFreshRun } from "./contextBoundary.ts";
 import {
@@ -1247,7 +1249,10 @@ export const layer: Layer.Layer<
         // Row identity survives recovery; only accepted native input and delivered history occupy the new session.
         const nativeContextEstimate = Effect.gen(function* () {
           return sameNativeThread
-            ? (yield* projectionStore.getTurnStartHistory(input.threadId)).reduce((sum, item) => {
+            ? // fork: transcript edit
+              forkVisibleTurnItems(
+                yield* projectionStore.getTurnStartHistory(input.threadId),
+              ).reduce((sum, item) => {
                 const acceptedNatively =
                   item.providerThreadId === providerThread.id &&
                   item.runId !== null &&
@@ -1318,9 +1323,10 @@ export const layer: Layer.Layer<
           const missedHistory =
             missedRunIds.size === 0
               ? []
-              : (yield* projectionStore.getTurnStartHistory(input.threadId, [
-                  ...missedRunIds,
-                ])).filter((item) => item.runId !== null && missedRunIds.has(item.runId));
+              : // fork: transcript edit
+                forkVisibleTurnItems(
+                  yield* projectionStore.getTurnStartHistory(input.threadId, [...missedRunIds]),
+                ).filter((item) => item.runId !== null && missedRunIds.has(item.runId));
           const missedItems = missedHistory.filter(
             (item) => !coveredItemIds.has(item.id) && historicalMessage(item) !== null,
           );
@@ -1380,7 +1386,10 @@ export const layer: Layer.Layer<
             type: "provider_resume_fallback",
           });
           const createdAt = yield* DateTime.now;
-          const history = yield* projectionStore.getTurnStartHistory(input.threadId);
+          // fork: transcript edit
+          const history = forkVisibleTurnItems(
+            yield* projectionStore.getTurnStartHistory(input.threadId),
+          );
           const boundary = contextBoundaryOrdinal({ runs: projection.runs, turnItems: history });
           const from = Math.max(1, boundary);
           const handoff = yield* contextHandoffService.prepareProviderHandoff({
