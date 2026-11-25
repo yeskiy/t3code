@@ -176,7 +176,8 @@ function ForkTranscriptSelectProvider(props: {
             ? actions().setSelection(emptySelection)
             : actions().setSelectMode(false);
       }
-      if (target === null || props.viewport?.contains(target) !== true) return null;
+      // A moved row can render again and drop its focus to the body, so the body counts as the timeline.
+      if (target !== document.body && props.viewport?.contains(target) !== true) return null;
       if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "a") {
         return () => actions().setSelection(selectAll(order));
       }

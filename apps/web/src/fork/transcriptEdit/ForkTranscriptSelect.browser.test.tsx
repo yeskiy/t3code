@@ -564,6 +564,8 @@ describe("ForkTranscriptSelect", () => {
     expect(session(screen.threadKey).history.steps.map((item) => item.label)).toEqual([
       "Moved 2 messages",
     ]);
+    // A moved row can render again and drop its focus to the body.
+    (document.activeElement as HTMLElement | null)?.blur();
     await userEvent.keyboard("{Control>}a{/Control}");
     expect(session(screen.threadKey).selection.keys.size).toBe(BASE_UNITS.length);
   });
