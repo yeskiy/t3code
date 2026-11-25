@@ -255,6 +255,9 @@ import {
   readTailscaleStatus,
 } from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
+// fork: one-time backfill of conversation-only checkpoints for failed runs.
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { backfillFailedRunCheckpointsOnStartup } from "./fork/rewind/failedRunCheckpointBackfill.ts";
 
 // Escaped MCP handoff provenance can exceed find-my-way's 100-character segment default.
 const HTTP_ROUTER_CONFIG = {
@@ -780,6 +783,10 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderInstallation.layer,
   ReplayMarkers.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
+  // fork: one-time backfill of conversation-only checkpoints for failed runs.
+  Layer.effectDiscard(backfillFailedRunCheckpointsOnStartup).pipe(
+    Layer.provide(Layer.merge(RuntimeLayer.layerEventSink, IdAllocator.layer)),
+  ),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),
   // One hub, which the feeders above and the workflow store inside the runtime publish to.

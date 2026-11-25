@@ -46,6 +46,8 @@ import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ForkStopScope from "../fork/ForkStopScope.ts"; // fork: turn-scoped Stop
 // fork: agent definitions
 import { ForkDelegationAgents } from "../fork/delegationAgents/ForkDelegationAgents.ts";
+// fork: failed runs capture checkpoints too.
+import { forkRunCapturesCheckpoint } from "../fork/rewind/checkpointCapture.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -887,23 +889,20 @@ export const layer: Layer.Layer<
         );
         // Stopped runs capture rollback points for the next message; enqueue before later starts on this effect lane.
         const finalization = {
-          effects:
-            input.terminal.status === "completed" ||
-            input.terminal.status === "interrupted" ||
-            input.terminal.status === "cancelled"
-              ? [
-                  {
-                    id: `effect:checkpoint.capture:${input.run.id}`,
-                    commandId: checkpointCaptureCommandId,
-                    threadId: input.run.threadId,
-                    request: {
-                      type: "checkpoint.capture" as const,
-                      runId: input.run.id,
-                      scopeId: input.checkpointScope.id,
-                    },
+          effects: forkRunCapturesCheckpoint(input.terminal.status) // fork: failed runs capture too
+            ? [
+                {
+                  id: `effect:checkpoint.capture:${input.run.id}`,
+                  commandId: checkpointCaptureCommandId,
+                  threadId: input.run.threadId,
+                  request: {
+                    type: "checkpoint.capture" as const,
+                    runId: input.run.id,
+                    scopeId: input.checkpointScope.id,
                   },
-                ]
-              : [],
+                },
+              ]
+            : [],
           events: [
             ...cascadedSubagentEvents,
             ...(yield* interruptLostToolCalls({
