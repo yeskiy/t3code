@@ -599,3 +599,156 @@ export const remapCursor = (input: {
   if (start === undefined) return null;
   return walk(start.parentUuid ?? null, new Set([input.cursor]));
 };
+
+const claudeNativeId = (item: OrchestrationV2TurnItem): string | null =>
+  item.nativeItemRef?.driver === "claudeAgent" ? item.nativeItemRef.nativeId : null;
+
+const withoutHidden = (item: OrchestrationV2TurnItem): OrchestrationV2TurnItem => {
+  if (item.forkTranscriptHidden !== true) return item;
+  const { forkTranscriptHidden: _hidden, ...rest } = item;
+  return rest as OrchestrationV2TurnItem;
+};
+
+const THINKING_NATIVE_ID = /^(.*):thinking:\d+$/u;
+
+// Picks one item per native id, the first after the items chosen for earlier units.
+const pickRestoredItems = (
+  units: ReadonlyArray<Unit>,
+  map: ReadonlyMap<string, MappedUnit>,
+  byId: ReadonlyMap<TurnItemId, OrchestrationV2TurnItem>,
+  threadId: ThreadId,
+): ReadonlyMap<TurnItemId, Unit> =>
+  units.reduce(
+    (acc, unit) => {
+      const own = (map.get(unit.key)?.itemIds ?? []).flatMap((id) => {
+        const item = byId.get(id);
+        return item !== undefined && item.threadId === threadId ? [item] : [];
+      });
+      const groups = own.reduce((grouped, item) => {
+        const key = claudeNativeId(item) ?? item.id;
+        grouped.set(key, [...(grouped.get(key) ?? []), item]);
+        return grouped;
+      }, new Map<string, ReadonlyArray<OrchestrationV2TurnItem>>());
+      const picks = [...groups.values()].flatMap((group) => {
+        const sorted = group.toSorted((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id));
+        const pick = sorted.find((item) => item.ordinal > acc.last) ?? sorted.at(-1);
+        return pick === undefined ? [] : [pick];
+      });
+      picks.forEach((item) => acc.picked.set(item.id, unit));
+      return { picked: acc.picked, last: Math.max(acc.last, ...picks.map((item) => item.ordinal)) };
+    },
+    { picked: new Map<TurnItemId, Unit>(), last: Number.NEGATIVE_INFINITY },
+  ).picked;
+
+const restoredText = (
+  item: OrchestrationV2TurnItem,
+  unit: Unit,
+  entryMap: ReadonlyMap<string, Entry>,
+): string | null => {
+  const nativeId = claudeNativeId(item);
+  if (item.type === "user_message") {
+    return unit.main.map((uuid) => entryText(entryMap.get(uuid))).join("");
+  }
+  if (item.type === "assistant_message") {
+    return nativeId === null ? null : entryText(entryMap.get(nativeId));
+  }
+  if (item.type === "system_notice") {
+    const content = nativeId === null ? undefined : entryMap.get(nativeId)?.content;
+    return typeof content === "string" ? content : null;
+  }
+  return null;
+};
+
+// Rebuilds hide flags and texts of the thread items from a restored transcript.
+export const remirror = (input: {
+  readonly transcript: Transcript;
+  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+  readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  readonly threadId: ThreadId;
+  readonly now: DateTime.Utc;
+}): MirrorPlan => {
+  const entryMap = byUuid(input.transcript);
+  const isOwn = (item: OrchestrationV2TurnItem) => item.threadId === input.threadId;
+  const thinkingKept = (item: OrchestrationV2TurnItem): boolean => {
+    const owner = THINKING_NATIVE_ID.exec(claudeNativeId(item) ?? "")?.[1];
+    const entry = owner === undefined ? undefined : entryMap.get(owner);
+    return (
+      item.type !== "reasoning" ||
+      (entry !== undefined && blocks(entry).some((block) => THINKING_BLOCK_TYPES.has(block.type)))
+    );
+  };
+  // Inserted messages carry a native id that a restored file may lack; they must not map by text.
+  const candidates = input.items.flatMap((item) => {
+    if (!isOwn(item)) return [item];
+    const nativeId = claudeNativeId(item);
+    const orphanMessage =
+      (item.type === "user_message" || item.type === "assistant_message") &&
+      nativeId !== null &&
+      !entryMap.has(nativeId);
+    return orphanMessage ? [] : [withoutHidden(item)];
+  });
+  const units = buildUnits(input.transcript);
+  const resolve = (pool: ReadonlyArray<OrchestrationV2TurnItem>) => {
+    const map = mapUnitsToItems({
+      transcript: input.transcript,
+      items: pool,
+      threadId: input.threadId,
+    });
+    const byId = new Map(pool.map((item) => [item.id, item] as const));
+    return { map, picked: pickRestoredItems(units, map, byId, input.threadId) };
+  };
+  // A second pass drops unpicked duplicates, so a moved clone cannot pull a user unit into its run.
+  const first = resolve(candidates);
+  const dropped = new Set(
+    [...first.map.values()]
+      .flatMap((mapped) => mapped.itemIds)
+      .filter((id) => !first.picked.has(id)),
+  );
+  const { map, picked } = resolve(candidates.filter((item) => !dropped.has(item.id)));
+  const messagesById = new Map(input.messages.map((message) => [message.id, message] as const));
+
+  const changes = input.items.filter(isOwn).flatMap((item) => {
+    const unit = picked.get(item.id);
+    const keep = unit !== undefined && thinkingKept(item);
+    if (!keep) {
+      return claudeNativeId(item) !== null && item.forkTranscriptHidden !== true
+        ? [{ item: { ...item, forkTranscriptHidden: true as const, updatedAt: input.now } }]
+        : [];
+    }
+    const text = restoredText(item, unit, entryMap);
+    const visible = withoutHidden(item);
+    const next: OrchestrationV2TurnItem =
+      text === null
+        ? visible
+        : visible.type === "system_notice"
+          ? { ...visible, message: text }
+          : visible.type === "user_message" || visible.type === "assistant_message"
+            ? { ...visible, text }
+            : visible;
+    const textChanged =
+      text !== null &&
+      (("text" in item && item.type !== "reasoning" && item.text !== text) ||
+        (item.type === "system_notice" && item.message !== text));
+    if (!textChanged && item.forkTranscriptHidden !== true) return [];
+    const message =
+      textChanged && (item.type === "user_message" || item.type === "assistant_message")
+        ? messagesById.get(item.messageId)
+        : undefined;
+    return [
+      {
+        item: { ...next, updatedAt: input.now },
+        ...(message === undefined || message.threadId !== input.threadId || text === null
+          ? {}
+          : { message: { ...message, text, updatedAt: input.now } }),
+      },
+    ];
+  });
+
+  return {
+    items: changes.map((change) => change.item),
+    messages: changes.flatMap((change) => ("message" in change ? [change.message] : [])),
+    positions: [],
+    unmappedUnits: units.filter((unit) => unit.kind !== "preamble" && !map.has(unit.key)).length,
+    inheritedUnits: [...map.values()].filter((mapped) => mapped.inherited).length,
+  };
+};

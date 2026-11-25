@@ -19,7 +19,7 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { FIXTURE_TEXT } from "./core/fixtures.ts";
 import { parseJsonl } from "./core/jsonl.ts";
 import { applyOp, applyOps } from "./core/ops.ts";
-import { planMirror, remapCursor } from "./projectionMirror.ts";
+import { planMirror, remapCursor, remirror } from "./projectionMirror.ts";
 
 const THREAD_ID = ThreadId.make("thread:main");
 const PARENT_THREAD_ID = ThreadId.make("thread:parent");
@@ -555,6 +555,100 @@ describe("projectionMirror", () => {
       message: "new notice",
       updatedAt: NOW,
     });
+  });
+
+  it("remirror restores text, unhides restored units, and hides items that inserts and moves added", () => {
+    const { base, items, messages } = fixtureState();
+    const plan = planMirror({
+      base,
+      ops: [
+        { kind: "editAssistantText", uuid: "a1", block: 0, text: "EDITED" },
+        { kind: "editUserText", uuid: "u1", block: null, text: "EDITED ONE" },
+        { kind: "deleteUnit", unit: "a3" },
+        { kind: "removeThinking", target: "all" },
+        { kind: "moveUnit", unit: "a4", toIndex: 1 },
+        {
+          kind: "insertMessage",
+          role: "user",
+          text: "inserted",
+          index: 2,
+          uuid: "n1",
+          timestamp: "2026-11-25T10:00:02.500Z",
+          messageId: null,
+        },
+      ],
+      items,
+      messages,
+      threadId: THREAD_ID,
+      providerThreadId: PROVIDER_THREAD_ID,
+      now: NOW,
+      newId: makeNewId,
+    });
+    const upsert = <T extends { readonly id: string }>(
+      current: ReadonlyArray<T>,
+      next: ReadonlyArray<T>,
+    ): ReadonlyArray<T> => [
+      ...new Map([...current, ...next].map((value) => [value.id, value] as const)).values(),
+    ];
+    const editedItems = upsert(items, plan.items);
+    const editedMessages = upsert(messages, plan.messages);
+
+    const restored = remirror({
+      transcript: base,
+      items: editedItems,
+      messages: editedMessages,
+      threadId: THREAD_ID,
+      now: NOW,
+    });
+    const after = new Map(upsert(editedItems, restored.items).map((i) => [i.id, i] as const));
+    const view = (id: string) => {
+      const item = after.get(TurnItemId.make(id));
+      return [
+        item?.forkTranscriptHidden === true,
+        item !== undefined && "text" in item ? item.text : null,
+      ];
+    };
+
+    expect(restored.positions).toEqual([]);
+    expect(restored.unmappedUnits).toBe(0);
+    expect(restored.inheritedUnits).toBe(0);
+    expect(view("item:u1")).toEqual([false, "one"]);
+    expect(view("item:a1t")).toEqual([false, "hm"]);
+    expect(view("item:a1")).toEqual([false, "reply one"]);
+    expect(view("item:a3")).toEqual([false, "done"]);
+    expect(view("item:a4")).toEqual([false, "reply two"]);
+    expect(view("new:item:a4")).toEqual([true, "reply two"]);
+    expect(view("new:item:n1")).toEqual([true, "inserted"]);
+    const restoredMessages = new Map(
+      upsert(editedMessages, restored.messages).map((m) => [m.id, m.text] as const),
+    );
+    expect(restoredMessages.get(MessageId.make("msg:a1"))).toBe("reply one");
+    expect(restoredMessages.get(MessageId.make("msg:u1"))).toBe("one");
+
+    const again = remirror({
+      transcript: base,
+      items: [...after.values()],
+      messages: upsert(editedMessages, restored.messages),
+      threadId: THREAD_ID,
+      now: NOW,
+    });
+    expect(again.items).toEqual([]);
+    expect(again.messages).toEqual([]);
+  });
+
+  it("remirror hides a reasoning item when the restored entry has no thinking", () => {
+    const { base, items, messages } = fixtureState();
+    const withoutThinking = applyOp(base, { kind: "removeThinking", target: "all" });
+    const restored = remirror({
+      transcript: withoutThinking,
+      items,
+      messages,
+      threadId: THREAD_ID,
+      now: NOW,
+    });
+    expect(restored.items.map((i) => [i.id, i.forkTranscriptHidden])).toEqual([
+      [TurnItemId.make("item:a1t"), true],
+    ]);
   });
 
   it("remaps deleted cursors to their nearest surviving ancestor on the edited path", () => {
