@@ -330,11 +330,19 @@ const stopWithBackgroundWork = (input: {
               event.payload.id === run.id &&
               (event.payload.status === "failed" || event.payload.status === "interrupted"),
           );
+          // The delegated task runs on the same shared session, so its run also ends.
+          const delegatedEnded = yield* watch(
+            (event) =>
+              event.type === "turn-item.updated" &&
+              event.payload.type === "subagent" &&
+              event.payload.status !== "running",
+          );
           yield* sessions.release({
             providerSessionId: started.providerThreads[0]!.providerSessionId!,
             reason: "runtime_error",
           });
           yield* Fiber.join(ended);
+          yield* Fiber.join(delegatedEnded);
           // Ignore the stream-exit cleanup interrupt triggered by session release itself.
           interrupts.length = 0;
         }
@@ -444,7 +452,10 @@ it.effect("a turn-scoped Stop ends the background work of a provider session tha
     assert.equal(stopped.devServer, "interrupted");
     assert.isTrue(stopped.watched);
     assert.isFalse(stopped.stopsDelegatedTasks);
-    assert.equal(stopped.delegatedItem, "running");
+    // The dead session fails the delegated task and delivers its result. A Stop would
+    // mark it interrupted and dispose its wake.
+    assert.equal(stopped.delegatedItem, "failed");
+    assert.equal(stopped.delegatedWake, "claimed");
   }),
 );
 
