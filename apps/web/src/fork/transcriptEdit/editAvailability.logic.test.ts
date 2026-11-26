@@ -23,6 +23,7 @@ const base = {
   unitKey: "a1",
   unit: unit(false),
   loaded: true,
+  beforeCompaction: false,
 } as const;
 
 describe("editBlock", () => {
@@ -48,6 +49,21 @@ describe("editBlock", () => {
 
   it("gives null for a linked Claude unit", () => {
     expect(editBlock(base)).toBeNull();
+  });
+
+  it("gives before-compaction for an unlinked item before the last compaction", () => {
+    const before = { ...base, unitKey: null, unit: undefined, beforeCompaction: true };
+    expect(editBlock(before)).toBe("before-compaction");
+    expect(editBlock({ ...before, loaded: false })).toBe("before-compaction");
+  });
+
+  it("lets a linked unit win over the compaction mark", () => {
+    expect(editBlock({ ...base, beforeCompaction: true })).toBeNull();
+    expect(editBlock({ ...base, unit: unit(true), beforeCompaction: true })).toBe("locked");
+  });
+
+  it("gives not-claude before before-compaction", () => {
+    expect(editBlock({ ...base, driver: "codex", beforeCompaction: true })).toBe("not-claude");
   });
 
   it("gives null for an unknown driver, so the load decides", () => {
