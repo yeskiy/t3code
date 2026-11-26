@@ -10,9 +10,9 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { FIXTURE_TEXT } from "./core/fixtures.ts";
+import { COMPACTED_FIXTURE_TEXT, FIXTURE_TEXT } from "./core/fixtures.ts";
 import { parseJsonl } from "./core/jsonl.ts";
-import { itemForEntryText, mapUnitsToItems } from "./itemMap.ts";
+import { itemForEntryText, lastCompactionItemId, mapUnitsToItems } from "./itemMap.ts";
 
 const THREAD_ID = ThreadId.make("thread:main");
 const PARENT_THREAD_ID = ThreadId.make("thread:parent");
@@ -198,13 +198,15 @@ describe("itemMap", () => {
       inherited: false,
     });
 
-    expect(itemForEntryText(mapped, items, "u1", "user_message")?.id).toBe(
+    expect(itemForEntryText(mapped, items, "u1", "user_message", transcript)?.id).toBe(
       TurnItemId.make("item:u1"),
     );
-    expect(itemForEntryText(mapped, items, "a1", "assistant_message")?.id).toBe(
+    expect(itemForEntryText(mapped, items, "a1", "assistant_message", transcript)?.id).toBe(
       TurnItemId.make("item:a1"),
     );
-    expect(itemForEntryText(mapped, items, "missing", "assistant_message")).toBeUndefined();
+    expect(
+      itemForEntryText(mapped, items, "missing", "assistant_message", transcript),
+    ).toBeUndefined();
   });
 
   it("marks a unit inherited when a mapped item belongs to another thread", () => {
@@ -366,5 +368,63 @@ describe("itemMap", () => {
 
     const mapped = mapUnitsToItems({ transcript, items, threadId: THREAD_ID });
     expect(mapped.get("a4")?.itemIds).toEqual([TurnItemId.make("item:a4-clone")]);
+  });
+
+  it("maps streamed assistant items by message id and finds the item of each text entry", () => {
+    const transcript = parseJsonl(COMPACTED_FIXTURE_TEXT);
+    const items: ReadonlyArray<OrchestrationV2TurnItem> = [
+      makeReasoningItem({
+        id: TurnItemId.make("item:a5t"),
+        nativeId: "msg_5:thinking:0",
+        ordinal: 3_000_002,
+        text: "plan",
+      }),
+      makeAssistantItem({
+        id: TurnItemId.make("item:a5"),
+        nativeId: "msg_5:text:0",
+        ordinal: 3_000_003,
+        messageId: MessageId.make("msg:a5"),
+        text: "reply three",
+      }),
+      makeAssistantItem({
+        id: TurnItemId.make("item:a5b"),
+        nativeId: "msg_5:text:1",
+        ordinal: 3_000_004,
+        messageId: MessageId.make("msg:a5b"),
+        text: "more three",
+      }),
+    ];
+
+    const mapped = mapUnitsToItems({ transcript, items, threadId: THREAD_ID });
+    expect(mapped.get("a5")?.itemIds).toEqual([
+      TurnItemId.make("item:a5t"),
+      TurnItemId.make("item:a5"),
+      TurnItemId.make("item:a5b"),
+    ]);
+    expect(itemForEntryText(mapped, items, "a5", "assistant_message", transcript)?.id).toBe(
+      TurnItemId.make("item:a5"),
+    );
+    expect(itemForEntryText(mapped, items, "a5b", "assistant_message", transcript)?.id).toBe(
+      TurnItemId.make("item:a5b"),
+    );
+  });
+
+  it("gives the last completed Claude compaction item when the active path starts at a boundary", () => {
+    const compaction = (id: string, ordinal: number, status: "completed" | "failed") =>
+      ({
+        ...baseFields({ id: TurnItemId.make(id), nativeId: `native:${id}`, ordinal }),
+        status,
+        type: "compaction",
+        driver: ProviderDriverKind.make("claudeAgent"),
+      }) satisfies OrchestrationV2TurnItem;
+    const items: ReadonlyArray<OrchestrationV2TurnItem> = [
+      compaction("item:c1", 1_000_009, "completed"),
+      compaction("item:c2", 2_000_009, "completed"),
+      compaction("item:c3", 3_000_009, "failed"),
+      { ...compaction("item:c4", 4_000_009, "completed"), forkTranscriptHidden: true },
+    ];
+
+    expect(lastCompactionItemId(parseJsonl(COMPACTED_FIXTURE_TEXT), items)).toBe("item:c2");
+    expect(lastCompactionItemId(parseJsonl(FIXTURE_TEXT), items)).toBeNull();
   });
 });

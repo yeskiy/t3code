@@ -38,7 +38,7 @@ import { ProviderSessionManagerV2 } from "../../orchestration-v2/ProviderSession
 import * as ThreadCommandExecutor from "../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { FIXTURE_TEXT } from "./core/fixtures.ts";
+import { COMPACTED_FIXTURE_TEXT, FIXTURE_TEXT } from "./core/fixtures.ts";
 import {
   CONTINUE_TEXT,
   ForkTranscriptEdit,
@@ -562,6 +562,38 @@ describe("ForkTranscriptEdit", () => {
         assert.deepInclude(loaded.links, { itemId: "item:a1", unitKey: "a1", inherited: false });
         assert.deepInclude(loaded.links, { itemId: "item:a1t", unitKey: "a1", inherited: false });
         assert.deepInclude(loaded.links, { itemId: "item:u2", unitKey: "u2", inherited: false });
+        assert.isNull(loaded.compactionItemId);
+      }),
+    ),
+  );
+
+  it.live("loads a compacted file from its boundary and names the compaction item", () =>
+    runCase(({ edit, fs, dirs, sink }) =>
+      Effect.gen(function* () {
+        yield* fs.writeFileString(dirs.filePath, COMPACTED_FIXTURE_TEXT);
+        yield* sink.write({
+          events: [
+            {
+              id: EventId.make("event:seed:item:compact"),
+              type: "turn-item.updated",
+              threadId: THREAD_ID,
+              runId: RUN_2,
+              occurredAt: AT,
+              payload: {
+                ...itemBase("item:compact", RUN_2, "status-uuid", 2_000_009),
+                type: "compaction",
+                driver: CLAUDE,
+              },
+            },
+          ],
+        });
+        const loaded = yield* edit.load({ threadId: THREAD_ID });
+        assert.deepEqual(
+          loaded.units.map((unit) => unit.key),
+          ["b1", "s1", "u3", "a5"],
+        );
+        assert.equal(loaded.compactionItemId, "item:compact");
+        assert.isFalse(loaded.links.some((link) => link.unitKey === "u1" || link.unitKey === "a1"));
       }),
     ),
   );

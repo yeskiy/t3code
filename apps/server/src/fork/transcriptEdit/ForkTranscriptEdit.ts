@@ -52,7 +52,7 @@ import { tryApply } from "./core/ops.ts";
 import type { Transcript } from "./core/types.ts";
 import { validate } from "./core/validate.ts";
 import { fullBlockText, fullRawText, unitViews } from "./core/view.ts";
-import { mapUnitsToItems } from "./itemMap.ts";
+import { lastCompactionItemId, mapUnitsToItems } from "./itemMap.ts";
 import { type MirrorPlan, planMirror, remapCursor, remirror } from "./projectionMirror.ts";
 import {
   BACKUPS_KEPT,
@@ -581,6 +581,7 @@ const make = Effect.gen(function* () {
         baseKey: fresh.key,
         units: unitViews(fresh.base, TOOL_TEXT_LIMIT),
         links: itemLinks(fresh.base, target.records.turnItems, input.threadId),
+        compactionItemId: lastCompactionItemId(fresh.base, target.records.turnItems),
         validation: validate(fresh.base, fresh.base),
         live: { editable: true, reason: working ? "working" : null, working },
       };

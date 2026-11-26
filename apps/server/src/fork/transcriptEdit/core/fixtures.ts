@@ -89,3 +89,50 @@ export const FIXTURE_LINES = [
 ];
 
 export const FIXTURE_TEXT = `${FIXTURE_LINES.map((l) => JSON.stringify(l)).join("\n")}\n`;
+
+const assistantLine = (uuid: string, parentUuid: string, n: number, block: object) => ({
+  ...base,
+  type: "assistant",
+  uuid,
+  parentUuid,
+  timestamp: at(n),
+  message: { id: "msg_5", role: "assistant", content: [block] },
+});
+
+// A compaction cuts the chain: the boundary has no parent, so the active path starts there.
+const COMPACTED_FIXTURE_LINES = [
+  ...FIXTURE_LINES.slice(1, 4),
+  {
+    ...base,
+    type: "system",
+    subtype: "compact_boundary",
+    uuid: "b1",
+    parentUuid: null,
+    logicalParentUuid: "a1",
+    timestamp: at(10),
+    content: "Conversation compacted",
+  },
+  {
+    ...base,
+    type: "user",
+    uuid: "s1",
+    parentUuid: "b1",
+    isCompactSummary: true,
+    timestamp: at(11),
+    message: { role: "user", content: "summary of one" },
+  },
+  {
+    ...base,
+    type: "user",
+    uuid: "u3",
+    parentUuid: "s1",
+    timestamp: at(12),
+    message: { role: "user", content: "three" },
+  },
+  assistantLine("a5t", "u3", 13, { type: "thinking", thinking: "plan", signature: "sig5" }),
+  assistantLine("a5", "a5t", 14, { type: "text", text: "reply three" }),
+  assistantLine("a5b", "a5", 15, { type: "text", text: "more three" }),
+  { type: "last-prompt", leafUuid: "a5b", lastPrompt: "three", sessionId: "s-1" },
+];
+
+export const COMPACTED_FIXTURE_TEXT = `${COMPACTED_FIXTURE_LINES.map((l) => JSON.stringify(l)).join("\n")}\n`;

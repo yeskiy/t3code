@@ -1,6 +1,6 @@
 import type { OrchestrationV2TurnItem, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
 
-import { blocks, buildUnits, byUuid, type Unit } from "./core/model.ts";
+import { activePath, blocks, buildUnits, byUuid, entries, type Unit } from "./core/model.ts";
 import type { Entry, Transcript } from "./core/types.ts";
 
 export interface MappedUnit {
@@ -20,6 +20,7 @@ type UserMessageItem = Extract<OrchestrationV2TurnItem, { readonly type: "user_m
 
 const THINKING_BLOCK_TYPES = new Set(["thinking", "redacted_thinking"]);
 const THINKING_SUFFIX = /^:thinking:\d+$/u;
+const STREAM_SUFFIX = /^:(text|thinking):\d+$/u;
 
 const isClaudeItem = (item: OrchestrationV2TurnItem): item is ClaudeTurnItem =>
   item.nativeItemRef?.driver === "claudeAgent" && item.nativeItemRef.nativeId !== null;
@@ -77,23 +78,46 @@ const extractEntryText = (entry: Entry | undefined): string => {
     .join("");
 };
 
+const keepThinking = (list: ReadonlyArray<ClaudeTurnItem>, hasThinking: boolean): boolean =>
+  hasThinking || list.some((item) => item.forkTranscriptHidden !== true);
+
+const messageIdOf = (entry: Entry | undefined): string | null =>
+  typeof entry?.message?.id === "string" ? entry.message.id : null;
+
+// Snapshot items use `${uuid}:thinking:N`. Streamed items use `${message.id}:text:N` or `:thinking:N`.
 const mapAssistantUnit = (
   unit: Unit,
   entryMap: ReadonlyMap<string, Entry>,
   nativeIndex: ReadonlyMap<string, ReadonlyArray<ClaudeTurnItem>>,
 ): ReadonlyArray<OrchestrationV2TurnItem> => {
   const entries = [...nativeIndex.entries()];
-  const matched = unit.main.flatMap((uuid) => {
-    const exact = nativeIndex.get(uuid) ?? [];
+  const byEntry = unit.main.flatMap((uuid) => {
     const hasThinking = entryHasThinking(entryMap.get(uuid));
-    const thinking = entries.flatMap(([nativeId, list]) => {
-      if (!nativeId.startsWith(uuid)) return [];
-      if (!THINKING_SUFFIX.test(nativeId.slice(uuid.length))) return [];
-      return hasThinking || list.some((item) => item.forkTranscriptHidden !== true) ? list : [];
-    });
-    return [...exact, ...thinking];
+    const thinking = entries.flatMap(([nativeId, list]) =>
+      nativeId.startsWith(uuid) &&
+      THINKING_SUFFIX.test(nativeId.slice(uuid.length)) &&
+      keepThinking(list, hasThinking)
+        ? list
+        : [],
+    );
+    return [...(nativeIndex.get(uuid) ?? []), ...thinking];
   });
-  return uniqueSorted(matched);
+  const messageIds = new Set(unit.main.flatMap((uuid) => messageIdOf(entryMap.get(uuid)) ?? []));
+  const streamed = [...messageIds].flatMap((messageId) => {
+    const hasThinking = unit.main.some(
+      (uuid) =>
+        messageIdOf(entryMap.get(uuid)) === messageId && entryHasThinking(entryMap.get(uuid)),
+    );
+    return entries.flatMap(([nativeId, list]) => {
+      const kind = nativeId.startsWith(messageId)
+        ? STREAM_SUFFIX.exec(nativeId.slice(messageId.length))?.[1]
+        : undefined;
+      return kind === "text" || (kind === "thinking" && keepThinking(list, hasThinking))
+        ? list
+        : [];
+    });
+  });
+  return uniqueSorted([...byEntry, ...streamed]);
 };
 
 const mapToolUnit = (
@@ -245,23 +269,41 @@ export const mapUnitsToItems = (input: {
   return resolved.map;
 };
 
+// The streamed native ids of the text blocks of one entry, counted per message in file order.
+const streamTextIds = (transcript: Transcript, uuid: string): ReadonlySet<string> => {
+  const all = entries(transcript);
+  const entry = all.find((candidate) => candidate.uuid === uuid);
+  const messageId = messageIdOf(entry);
+  if (entry === undefined || messageId === null) return new Set();
+  const textCount = (candidate: Entry) => blocks(candidate).filter((b) => b.type === "text").length;
+  const start = all
+    .slice(0, all.indexOf(entry))
+    .filter((candidate) => candidate.type === "assistant" && messageIdOf(candidate) === messageId)
+    .reduce((count, candidate) => count + textCount(candidate), 0);
+  return new Set(
+    Array.from({ length: textCount(entry) }, (_, index) => `${messageId}:text:${start + index}`),
+  );
+};
+
 export const itemForEntryText = (
   map: ReadonlyMap<string, MappedUnit>,
   items: ReadonlyArray<OrchestrationV2TurnItem>,
   uuid: string,
   type: "user_message" | "assistant_message",
+  transcript: Transcript,
 ): OrchestrationV2TurnItem | undefined => {
   const byId = new Map(items.map((item) => [item.id, item] as const));
+  const textIds = streamTextIds(transcript, uuid);
+  const isEntryItem = (item: OrchestrationV2TurnItem) =>
+    item.nativeItemRef?.driver === "claudeAgent" &&
+    (item.nativeItemRef.nativeId === uuid || textIds.has(item.nativeItemRef.nativeId ?? ""));
   const direct = map.get(uuid);
   if (direct !== undefined) {
     const candidates = direct.itemIds.flatMap((id) => {
       const item = byId.get(id);
       return item !== undefined && item.type === type ? [item] : [];
     });
-    const exact = candidates.find(
-      (item) =>
-        item.nativeItemRef?.driver === "claudeAgent" && item.nativeItemRef.nativeId === uuid,
-    );
+    const exact = candidates.find(isEntryItem);
     if (exact !== undefined) return exact;
     if (candidates[0] !== undefined) return candidates[0];
   }
@@ -272,10 +314,24 @@ export const itemForEntryText = (
       const item = byId.get(id);
       return item !== undefined ? [item] : [];
     })
-    .find(
+    .find((item) => item.type === type && isEntryItem(item));
+};
+
+// After a compaction the active path starts at a compact_boundary. The last completed compaction
+// item stands for it, because its native id comes from the stream, not from the file.
+export const lastCompactionItemId = (
+  transcript: Transcript,
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): string | null => {
+  const root = activePath(transcript)[0];
+  if (root?.type !== "system" || root.subtype !== "compact_boundary") return null;
+  return (
+    sortItems(items).findLast(
       (item) =>
-        item.type === type &&
-        item.nativeItemRef?.driver === "claudeAgent" &&
-        item.nativeItemRef.nativeId === uuid,
-    );
+        item.type === "compaction" &&
+        item.driver === "claudeAgent" &&
+        item.status === "completed" &&
+        item.forkTranscriptHidden !== true,
+    )?.id ?? null
+  );
 };

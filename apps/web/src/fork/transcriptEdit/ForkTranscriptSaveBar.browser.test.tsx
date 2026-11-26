@@ -77,6 +77,7 @@ const loadResult: ForkTranscriptLoadResult = {
   baseKey: "key-1",
   units: [unit("u1", "Fix the parser"), unit("a1", "reply one")],
   links: [],
+  compactionItemId: null,
   validation: { errors: [], warnings: [] },
   live: { editable: true, reason: null, working: false },
 };

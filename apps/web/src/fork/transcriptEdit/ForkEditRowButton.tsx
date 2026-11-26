@@ -11,6 +11,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 import { environmentThreadDetails } from "~/state/threads";
 import { useV2ItemSupport } from "~/state/v2ItemSupport";
+import { compactionCutoff } from "./compaction.logic";
 import { editBlock, type EditBlock } from "./editAvailability.logic";
 import {
   forkTranscriptEditSessionAtom,
@@ -28,6 +29,8 @@ const BLOCK_TOOLTIP: Record<Exclude<EditBlock, null | "setting-off">, string> = 
   "not-claude": "Transcript editing works for Claude threads only.",
   "not-linked":
     "This entry is not in the session file that was loaded. Save or discard the changes, then try again.",
+  "before-compaction":
+    "Claude sees only the compaction summary for this part, so these messages cannot be edited.",
   locked: "This entry is locked. The session needs it.",
 };
 
@@ -46,6 +49,10 @@ const formRowId = (rowId: string): string => {
 
 const unitKeyFor = (session: ForkTranscriptEditSession, itemId: string): string | null =>
   session.load?.links.find((link) => link.itemId === itemId)?.unitKey ?? null;
+
+// Undefined means the transcript is not loaded yet, so the timeline decides the cutoff.
+const loadedCompactionId = (session: ForkTranscriptEditSession): string | null | undefined =>
+  session.load === null ? undefined : session.load.compactionItemId;
 
 function EditRowButton(props: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -72,26 +79,29 @@ function EditRowButton(props: {
       )?.driver ?? null,
   );
   const driver = support.providerThread?.driver ?? support.providerSession?.driver ?? threadDriver;
-  const block = useAtomValue(
-    forkTranscriptEditSessionAtom(props.threadKey),
-    (session): EditBlock => {
-      const unitKey = unitKeyFor(session, itemId);
-      const notClaude =
-        session.error?.code === "not-claude" || session.load?.live.reason === "not-claude";
-      return editBlock({
-        driver: notClaude ? "not-claude" : driver,
-        enabled: true,
-        unitKey,
-        unit: session.load?.units.find((unit) => unit.key === unitKey),
-        loaded: session.load !== null,
-      });
-    },
-  );
+  const quietRowsAtom = environmentThreadDetails.quietVisibleTurnItemsAtom(props.threadRef);
+  const sessionAtom = forkTranscriptEditSessionAtom(props.threadKey);
+  const compactionId = useAtomValue(sessionAtom, loadedCompactionId);
+  const cutoff = useAtomValue(quietRowsAtom, (rows) => compactionCutoff(rows, compactionId));
+  const blockOf = (session: ForkTranscriptEditSession, cut: number | null): EditBlock => {
+    const unitKey = unitKeyFor(session, itemId);
+    const notClaude =
+      session.error?.code === "not-claude" || session.load?.live.reason === "not-claude";
+    return editBlock({
+      driver: notClaude ? "not-claude" : driver,
+      enabled: true,
+      unitKey,
+      unit: session.load?.units.find((unit) => unit.key === unitKey),
+      loaded: session.load !== null,
+      beforeCompaction: cut !== null && props.projectedItem.position < cut,
+    });
+  };
+  const block = useAtomValue(sessionAtom, (session) => blockOf(session, cutoff));
 
   const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     await actions.ensureLoaded();
-    const session = registry.get(forkTranscriptEditSessionAtom(props.threadKey));
+    const session = registry.get(sessionAtom);
     if (session.error !== null && session.load === null) {
       toastManager.add({
         type: "error",
@@ -101,8 +111,21 @@ function EditRowButton(props: {
       return;
     }
     const unitKey = unitKeyFor(session, itemId);
-    const unit = session.load?.units.find((candidate) => candidate.key === unitKey);
-    if (unitKey === null || unit === undefined || unit.locked) return;
+    const reason = blockOf(
+      session,
+      compactionCutoff(registry.get(quietRowsAtom), loadedCompactionId(session)),
+    );
+    if (reason !== null || unitKey === null) {
+      toastManager.add({
+        type: "info",
+        title: "This entry cannot be edited",
+        description:
+          reason === null || reason === "setting-off"
+            ? BLOCK_TOOLTIP["not-linked"]
+            : BLOCK_TOOLTIP[reason],
+      });
+      return;
+    }
     const list = ctx.listRef.current;
     if (list && !(activity.isWorking && list.getState().isFollowingEnd)) {
       list.cancelScroll();
@@ -110,6 +133,27 @@ function EditRowButton(props: {
     }
     actions.openUnit(unitKey, formRowId(props.rowId));
   };
+
+  if (block === "before-compaction") {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className={cn(
+                "flex h-6 shrink-0 cursor-default items-center px-1 text-2xs text-muted-foreground/70 select-none",
+                props.reveal === "work" && WORK_REVEAL_CLASS_NAME,
+              )}
+              data-fork-transcript-before-compaction=""
+            />
+          }
+        >
+          Before compaction
+        </TooltipTrigger>
+        <TooltipPopup side="top">{BLOCK_TOOLTIP["before-compaction"]}</TooltipPopup>
+      </Tooltip>
+    );
+  }
 
   return (
     <Tooltip>

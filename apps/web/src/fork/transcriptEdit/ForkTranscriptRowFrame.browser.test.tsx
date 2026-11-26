@@ -101,6 +101,7 @@ const loadResult: ForkTranscriptLoadResult = {
     { itemId: "item-u1", unitKey: "u1", inherited: false },
     { itemId: "item-a1", unitKey: "a1", inherited: false },
   ],
+  compactionItemId: null,
   validation: { errors: [], warnings: [] },
   live: { editable: true, reason: null, working: false },
 };

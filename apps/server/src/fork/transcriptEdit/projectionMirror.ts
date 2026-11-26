@@ -178,7 +178,7 @@ const mirrorEditText = (
     items: currentItems,
     threadId: ctx.threadId,
   });
-  const target = itemForEntryText(map, currentItems, uuid, type);
+  const target = itemForEntryText(map, currentItems, uuid, type, state.transcript);
   if (target === undefined) {
     return { ...state, unmappedUnits: state.unmappedUnits + 1 };
   }

@@ -183,6 +183,8 @@ export const ForkTranscriptLoadResult = Schema.Struct({
   baseKey: Schema.String,
   units: Schema.Array(ForkTranscriptUnitView),
   links: Schema.Array(ForkTranscriptItemLink),
+  // The T3 compaction item of the last compaction on the active path. Items before it are locked.
+  compactionItemId: Schema.NullOr(Schema.String),
   validation: ForkTranscriptValidation,
   live: ForkTranscriptLive,
 });
