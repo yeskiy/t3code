@@ -144,6 +144,108 @@ const mapToolUnit = (
   return uniqueSorted(matched);
 };
 
+type AssistantMessageItem = Extract<
+  OrchestrationV2TurnItem,
+  { readonly type: "assistant_message" }
+>;
+
+// History imports write run-less items without a native id, one per text record in file order.
+const isImportedAssistant = (item: OrchestrationV2TurnItem): item is AssistantMessageItem =>
+  item.type === "assistant_message" &&
+  item.nativeItemRef === null &&
+  item.runId === null &&
+  item.forkTranscriptHidden !== true;
+
+// The importer trims each text block and joins the blocks with newlines.
+const importedText = (entry: Entry): string => {
+  const content = entry.message?.content;
+  if (typeof content === "string") return content.trim();
+  return blocks(entry)
+    .flatMap((block) =>
+      block.type === "text" && typeof block.text === "string" && block.text.trim() !== ""
+        ? [block.text.trim()]
+        : [],
+    )
+    .join("\n");
+};
+
+const isImportedRecord = (entry: Entry): boolean =>
+  entry.type === "assistant" &&
+  entry.isSidechain !== true &&
+  entry.isMeta !== true &&
+  entry.isCompactSummary !== true;
+
+// One longest common subsequence: pairs keep their order, and a tie goes to the later entry.
+const alignInOrder = <A, B>(
+  a: ReadonlyArray<A>,
+  b: ReadonlyArray<B>,
+  same: (x: A, y: B) => boolean,
+): ReadonlyArray<readonly [A, B]> => {
+  const width = b.length + 1;
+  const table = new Int32Array((a.length + 1) * width);
+  const at = (i: number, j: number) => table[i * width + j] ?? 0;
+  a.toReversed().forEach((x, ri) => {
+    const i = a.length - 1 - ri;
+    b.toReversed().forEach((y, rj) => {
+      const j = b.length - 1 - rj;
+      table[i * width + j] = same(x, y)
+        ? at(i + 1, j + 1) + 1
+        : Math.max(at(i + 1, j), at(i, j + 1));
+    });
+  });
+  return Array.from({ length: a.length + b.length }).reduce<{
+    readonly i: number;
+    readonly j: number;
+    readonly pairs: ReadonlyArray<readonly [A, B]>;
+  }>(
+    (acc) => {
+      const x = a[acc.i];
+      const y = b[acc.j];
+      if (x === undefined || y === undefined) return acc;
+      if (at(acc.i + 1, acc.j) === at(acc.i, acc.j)) return { ...acc, i: acc.i + 1 };
+      return same(x, y)
+        ? { i: acc.i + 1, j: acc.j + 1, pairs: [...acc.pairs, [x, y] as const] }
+        : { ...acc, j: acc.j + 1 };
+    },
+    { i: 0, j: 0, pairs: [] },
+  ).pairs;
+};
+
+// Pairs the text entries of units without native items with imported assistant items.
+const importedByEntry = (
+  units: ReadonlyArray<Unit>,
+  entryMap: ReadonlyMap<string, Entry>,
+  sortedItems: ReadonlyArray<OrchestrationV2TurnItem>,
+  nativeMatches: ReadonlyMap<string, ReadonlyArray<OrchestrationV2TurnItem>>,
+): ReadonlyMap<string, AssistantMessageItem> => {
+  const items = sortedItems.filter(isImportedAssistant);
+  if (items.length === 0) return new Map();
+  const texts = new Set(items.map((item) => item.text));
+  const records = units
+    .filter(
+      (unit) =>
+        (unit.kind === "assistant" || unit.kind === "tool") &&
+        (nativeMatches.get(unit.key) ?? []).length === 0,
+    )
+    .flatMap((unit) =>
+      unit.main.flatMap((uuid) => {
+        const entry = entryMap.get(uuid);
+        if (entry === undefined || !isImportedRecord(entry)) return [];
+        const forms = new Set(
+          [importedText(entry), extractEntryText(entry)].filter(
+            (text) => text !== "" && texts.has(text),
+          ),
+        );
+        return forms.size > 0 ? [{ uuid, forms }] : [];
+      }),
+    );
+  return new Map(
+    alignInOrder(records, items, (record, item) => record.forms.has(item.text)).map(
+      ([record, item]) => [record.uuid, item] as const,
+    ),
+  );
+};
+
 const mapSystemUnit = (
   unit: Unit,
   nativeIndex: ReadonlyMap<string, ReadonlyArray<ClaudeTurnItem>>,
@@ -206,18 +308,15 @@ const pickUserItem = (input: {
   return runless.find((item) => item.text === text);
 };
 
-export const mapUnitsToItems = (input: {
-  readonly transcript: Transcript;
-  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
-  readonly threadId: ThreadId;
-}): ReadonlyMap<string, MappedUnit> => {
-  const units = buildUnits(input.transcript);
-  const entryMap = byUuid(input.transcript);
-  const sortedItems = sortItems(input.items);
+const resolveNonUserMatches = (
+  transcript: Transcript,
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+) => {
+  const units = buildUnits(transcript);
+  const entryMap = byUuid(transcript);
+  const sortedItems = sortItems(items);
   const nativeIndex = indexByNativeId(sortedItems);
-  const userItems = sortedItems.filter(isUserMessageItem);
-
-  const nonUserMatches = new Map<string, ReadonlyArray<OrchestrationV2TurnItem>>(
+  const nativeMatches = new Map<string, ReadonlyArray<OrchestrationV2TurnItem>>(
     units.flatMap((unit) => {
       if (unit.kind === "assistant") {
         return [[unit.key, mapAssistantUnit(unit, entryMap, nativeIndex)] as const];
@@ -231,6 +330,32 @@ export const mapUnitsToItems = (input: {
       return [];
     }),
   );
+  const imported = importedByEntry(units, entryMap, sortedItems, nativeMatches);
+  const nonUserMatches = new Map<string, ReadonlyArray<OrchestrationV2TurnItem>>(
+    units.flatMap((unit) => {
+      const native = nativeMatches.get(unit.key);
+      if (native === undefined) return [];
+      return [
+        [
+          unit.key,
+          native.length > 0 ? native : unit.main.flatMap((uuid) => imported.get(uuid) ?? []),
+        ] as const,
+      ];
+    }),
+  );
+  return { units, entryMap, sortedItems, nativeIndex, nonUserMatches, imported };
+};
+
+export const mapUnitsToItems = (input: {
+  readonly transcript: Transcript;
+  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+  readonly threadId: ThreadId;
+}): ReadonlyMap<string, MappedUnit> => {
+  const { units, entryMap, sortedItems, nativeIndex, nonUserMatches } = resolveNonUserMatches(
+    input.transcript,
+    input.items,
+  );
+  const userItems = sortedItems.filter(isUserMessageItem);
 
   const resolved = units.reduce<{
     readonly map: Map<string, MappedUnit>;
@@ -297,16 +422,19 @@ export const itemForEntryText = (
   const isEntryItem = (item: OrchestrationV2TurnItem) =>
     item.nativeItemRef?.driver === "claudeAgent" &&
     (item.nativeItemRef.nativeId === uuid || textIds.has(item.nativeItemRef.nativeId ?? ""));
-  const direct = map.get(uuid);
-  if (direct !== undefined) {
-    const candidates = direct.itemIds.flatMap((id) => {
-      const item = byId.get(id);
-      return item !== undefined && item.type === type ? [item] : [];
-    });
-    const exact = candidates.find(isEntryItem);
-    if (exact !== undefined) return exact;
-    if (candidates[0] !== undefined) return candidates[0];
-  }
+  const candidates = (map.get(uuid)?.itemIds ?? []).flatMap((id) => {
+    const item = byId.get(id);
+    return item !== undefined && item.type === type ? [item] : [];
+  });
+  const exact = candidates.find(isEntryItem);
+  if (exact !== undefined) return exact;
+  // An imported unit has one item per text entry, also for an entry that is not the unit key.
+  const imported =
+    type === "assistant_message"
+      ? resolveNonUserMatches(transcript, items).imported.get(uuid)
+      : undefined;
+  if (imported !== undefined) return imported;
+  if (candidates[0] !== undefined) return candidates[0];
 
   return [...map.values()]
     .flatMap((unit) => unit.itemIds)

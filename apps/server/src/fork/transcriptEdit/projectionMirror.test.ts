@@ -186,6 +186,59 @@ const fixtureState = () => {
   return { base: parseJsonl(FIXTURE_TEXT), items, messages };
 };
 
+// Imported history: run-less items without native ids, and texts that repeat.
+const importedState = () => {
+  const line = (uuid: string, parentUuid: string | null, type: string, content: unknown) => ({
+    type,
+    uuid,
+    parentUuid,
+    sessionId: "s-imported",
+    message: { id: `m:${uuid}`, role: type, content },
+  });
+  const text = (value: string) => [{ type: "text", text: value }];
+  const base = parseJsonl(
+    `${[
+      line("u1", null, "user", "start"),
+      line("a1", "u1", "assistant", text("Looking.")),
+      line("a2", "a1", "assistant", text("Done.")),
+      line("u2", "a2", "user", "next"),
+      line("a3", "u2", "assistant", text("Part one")),
+      line("a4", "a3", "assistant", text("Done.")),
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n")}\n`,
+  );
+  const rows = [
+    ["user", "start"],
+    ["assistant", "Looking."],
+    ["assistant", "Done."],
+    ["user", "next"],
+    ["assistant", "Part one"],
+    ["assistant", "Done."],
+  ] as const;
+  const messages = rows.map(([role, value], index) =>
+    makeMessage({ id: MessageId.make(`imp-msg:${index + 1}`), runId: null, role, text: value }),
+  );
+  const items: ReadonlyArray<OrchestrationV2TurnItem> = rows.map(([role, value], index) => {
+    const common = {
+      ...baseFields({ id: TurnItemId.make(`imp:${index + 1}`), runId: null, ordinal: index + 1 }),
+      messageId: MessageId.make(`imp-msg:${index + 1}`),
+      text: value,
+    };
+    return role === "user"
+      ? {
+          ...common,
+          type: "user_message",
+          createdBy: "user",
+          creationSource: "server",
+          inputIntent: "turn_start",
+          attachments: [],
+        }
+      : { ...common, type: "assistant_message", streaming: false };
+  });
+  return { base, items, messages };
+};
+
 const positionLayer = TurnItemPositionStore.layer.pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
 );
@@ -226,6 +279,67 @@ describe("projectionMirror", () => {
     const u1Msg = plan.messages.find((m) => m.id === MessageId.make("msg:u1"));
     expect(a1Msg).toMatchObject({ text: "UPDATED REPLY", updatedAt: NOW });
     expect(u1Msg).toMatchObject({ text: "UPDATED ONE", updatedAt: NOW });
+  });
+
+  it("edits and deletes the imported item of the same entry when a text repeats", () => {
+    const { base, items, messages } = importedState();
+    const plan = planMirror({
+      base,
+      ops: [
+        { kind: "editAssistantText", uuid: "a4", block: 0, text: "Finished." },
+        { kind: "deleteUnit", unit: "a2" },
+      ],
+      items,
+      messages,
+      threadId: THREAD_ID,
+      providerThreadId: PROVIDER_THREAD_ID,
+      now: NOW,
+      newId: makeNewId,
+    });
+
+    expect(plan.unmappedUnits).toBe(0);
+    expect(plan.positions).toEqual([]);
+    expect(
+      plan.items.map((i) => [i.id, "text" in i ? i.text : null, i.forkTranscriptHidden]),
+    ).toEqual([
+      [TurnItemId.make("imp:3"), "Done.", true],
+      [TurnItemId.make("imp:6"), "Finished.", undefined],
+    ]);
+    expect(plan.messages.map((m) => [m.id, m.text])).toEqual([
+      [MessageId.make("imp-msg:6"), "Finished."],
+    ]);
+  });
+
+  it("moves an imported item with a run-less clone and edits the clone", () => {
+    const { base, items, messages } = importedState();
+    const plan = planMirror({
+      base,
+      ops: [
+        { kind: "moveUnit", unit: "a4", toIndex: 1 },
+        { kind: "editAssistantText", uuid: "a4", block: 0, text: "Finished." },
+      ],
+      items,
+      messages,
+      threadId: THREAD_ID,
+      providerThreadId: PROVIDER_THREAD_ID,
+      now: NOW,
+      newId: makeNewId,
+    });
+
+    expect(plan.unmappedUnits).toBe(0);
+    const byId = new Map(plan.items.map((i) => [i.id, i] as const));
+    expect(byId.get(TurnItemId.make("imp:6"))?.forkTranscriptHidden).toBe(true);
+    expect(byId.get(TurnItemId.make("new:imp:6"))).toMatchObject({
+      runId: null,
+      nativeItemRef: null,
+      ordinal: 2,
+      text: "Finished.",
+    });
+    expect(byId.get(TurnItemId.make("imp:3"))).toMatchObject({ ordinal: 4, text: "Done." });
+    expect(byId.get(TurnItemId.make("imp:3"))?.forkTranscriptHidden).toBeUndefined();
+    expect(plan.messages.map((m) => [m.id, m.text])).toEqual([
+      [MessageId.make("imp-msg:6"), "Finished."],
+    ]);
   });
 
   it("hides only the tool item on deleteUnit a2", () => {

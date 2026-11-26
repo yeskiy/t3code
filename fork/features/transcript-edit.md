@@ -82,14 +82,16 @@ The Claude session file (`<configDir>/projects/<slug>/<sessionId>.jsonl`) is the
 - **Inherited rows:** Messages inherited from a parent thread belong to that parent thread. Editing them changes the child thread's session file, while the parent thread rows keep their old text in the timeline. The edit form shows a note and the save toast reports the inherited count.
 - **External terminal sessions:** Exit any terminal `claude --resume` session on the same session file before saving. T3 cannot see external terminal processes, and the conversation-key check refuses the save with `stale` if the file changed.
 - **Memory-only pending state:** Pending changes stay in memory only. Switching threads keeps pending changes (closing open forms and Select mode). A page reload or app restart drops them.
+- **Imported history:** Imported items have no Claude native id. An imported assistant item links to the active-path text entry in the same order with the same text (the importer trims each text block and joins blocks with newlines). The match uses one longest common subsequence, so each item links once and a repeated text links only in its place between other texts. Only run-less items without a native id take part, after the native-id match.
 - **Compaction:** Messages before the last compaction are not editable. The compaction item and the `compact_boundary` entry have different ids, so the server pairs the boundary with the last completed Claude compaction item. A compaction that T3 did not see (for example from a terminal session) is not marked, and its rows show the "not linked" reason.
 - **Read-only entries and truncation:** Tool calls, tool results, and raw entry fields are read-only. Thinking blocks can be removed, not edited. Preamble and `compact_boundary` units are locked. Views cut tool text and raw JSON at 2,000 characters and fetch full text on demand via `fork.transcriptEdit.blockText`. Each request accepts at most 10,000 operations.
 - **In-place save only:** Save writes the same session file in place. "Save as copy" and "Save as fork" are out of scope.
 
 ## Known gaps
 
-- Imported history items have no Claude native item reference, so imported assistant messages do not link to their file units. In an edit session each one also shows as a muted "Not shown in the timeline" row.
+- A moved imported assistant message that lands next to a live item gets the run of that item. It then no longer links, because imported items link only when they have no run.
 - A moved user unit restored by `remirror` can keep the wrong copy visible.
+- `remirror` does not restore the text of an imported assistant item, because the item has no native id. After a restore to a backup with other text, that item keeps its text and does not link.
 - An edited user message in imported history is matched by text only.
 - A turn queued during a stop makes the save fail after 20 s.
 - "Insert above" for a middle unit of a multi-unit work row opens at the row edge with a "Goes before" note.

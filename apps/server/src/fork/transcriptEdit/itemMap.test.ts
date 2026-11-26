@@ -161,7 +161,188 @@ const fixtureItems = (): ReadonlyArray<OrchestrationV2TurnItem> => [
   }),
 ];
 
+const IMPORTED_SESSION = "s-imported";
+
+const entryLine = (
+  uuid: string,
+  parentUuid: string | null,
+  type: "user" | "assistant",
+  content: unknown,
+  messageId?: string,
+) => ({
+  type,
+  uuid,
+  parentUuid,
+  sessionId: IMPORTED_SESSION,
+  message: { ...(messageId === undefined ? {} : { id: messageId }), role: type, content },
+});
+
+const textBlocks = (...texts: ReadonlyArray<string>) =>
+  texts.map((text) => ({ type: "text", text }));
+
+const importedTranscript = () =>
+  parseJsonl(
+    `${[
+      entryLine("u1", null, "user", "start"),
+      entryLine("a1", "u1", "assistant", textBlocks("Looking."), "m1"),
+      entryLine(
+        "a1b",
+        "a1",
+        "assistant",
+        [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } }],
+        "m1",
+      ),
+      entryLine("r1", "a1b", "user", [{ type: "tool_result", tool_use_id: "toolu_1" }]),
+      entryLine("a2", "r1", "assistant", textBlocks("Done."), "m2"),
+      entryLine("u2", "a2", "user", "next"),
+      entryLine("a3", "u2", "assistant", textBlocks("Part one"), "m3"),
+      entryLine("a3b", "a3", "assistant", textBlocks("  Part two  ", "tail"), "m3"),
+      entryLine("a4", "a3b", "assistant", textBlocks("Done."), "m4"),
+      entryLine("u3", "a4", "user", "live"),
+      entryLine("a5", "u3", "assistant", textBlocks("Done."), "m5"),
+      { type: "last-prompt", leafUuid: "a5", lastPrompt: "", sessionId: IMPORTED_SESSION },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")}\n`,
+  );
+
+const importedUser = (index: number, text: string) =>
+  makeUserItem({
+    id: TurnItemId.make(`imp:${index}`),
+    runId: null,
+    ordinal: index,
+    messageId: MessageId.make(`imp-msg:${index}`),
+    text,
+  });
+
+const importedAssistant = (index: number, text: string) =>
+  makeAssistantItem({
+    id: TurnItemId.make(`imp:${index}`),
+    runId: null,
+    ordinal: index,
+    messageId: MessageId.make(`imp-msg:${index}`),
+    text,
+  });
+
+// The importer keeps one item per text record, trims each block, and joins blocks with newlines.
+const importedItems = (): ReadonlyArray<OrchestrationV2TurnItem> => [
+  importedUser(1, "start"),
+  importedAssistant(2, "Looking."),
+  importedAssistant(3, "Done."),
+  importedUser(4, "next"),
+  importedAssistant(5, "Part one"),
+  importedAssistant(6, "Part two\ntail"),
+  importedAssistant(7, "Done."),
+  importedAssistant(8, "Off branch"),
+  makeUserItem({
+    id: TurnItemId.make("live:u3"),
+    ordinal: 1_000_001,
+    messageId: MessageId.make("live-msg:u3"),
+    text: "live",
+  }),
+  makeAssistantItem({
+    id: TurnItemId.make("live:a5"),
+    nativeId: "a5",
+    ordinal: 1_000_002,
+    messageId: MessageId.make("live-msg:a5"),
+    text: "Done.",
+  }),
+];
+
 describe("itemMap", () => {
+  it("links imported assistant items by order and text, each item once", () => {
+    const transcript = importedTranscript();
+    const items = importedItems();
+    const mapped = mapUnitsToItems({ transcript, items, threadId: THREAD_ID });
+    const ids = (key: string) => mapped.get(key)?.itemIds;
+
+    expect(ids("u1")).toEqual([TurnItemId.make("imp:1")]);
+    expect(ids("a1")).toEqual([TurnItemId.make("imp:2")]);
+    expect(ids("a1b")).toBeUndefined();
+    expect(ids("a2")).toEqual([TurnItemId.make("imp:3")]);
+    expect(ids("u2")).toEqual([TurnItemId.make("imp:4")]);
+    expect(ids("a3")).toEqual([TurnItemId.make("imp:5"), TurnItemId.make("imp:6")]);
+    expect(ids("a4")).toEqual([TurnItemId.make("imp:7")]);
+    expect(ids("u3")).toEqual([TurnItemId.make("live:u3")]);
+    expect(ids("a5")).toEqual([TurnItemId.make("live:a5")]);
+
+    const linked = [...mapped.values()].flatMap((unit) => unit.itemIds);
+    expect(new Set(linked).size).toBe(linked.length);
+    expect(linked).not.toContain(TurnItemId.make("imp:8"));
+
+    const entryItem = (uuid: string) =>
+      itemForEntryText(mapped, items, uuid, "assistant_message", transcript)?.id;
+    expect(entryItem("a3")).toBe(TurnItemId.make("imp:5"));
+    expect(entryItem("a3b")).toBe(TurnItemId.make("imp:6"));
+    expect(entryItem("a2")).toBe(TurnItemId.make("imp:3"));
+    expect(entryItem("a4")).toBe(TurnItemId.make("imp:7"));
+    expect(entryItem("a5")).toBe(TurnItemId.make("live:a5"));
+  });
+
+  it("links a repeated imported text by its place between unique texts", () => {
+    const transcript = importedTranscript();
+    const withoutFirstDone = importedItems().filter((item) => item.id !== TurnItemId.make("imp:3"));
+    const withoutSecondDone = importedItems().filter(
+      (item) => item.id !== TurnItemId.make("imp:7"),
+    );
+
+    const late = mapUnitsToItems({ transcript, items: withoutFirstDone, threadId: THREAD_ID });
+    expect(late.get("a2")).toBeUndefined();
+    expect(late.get("a4")?.itemIds).toEqual([TurnItemId.make("imp:7")]);
+
+    const early = mapUnitsToItems({ transcript, items: withoutSecondDone, threadId: THREAD_ID });
+    expect(early.get("a2")?.itemIds).toEqual([TurnItemId.make("imp:3")]);
+    expect(early.get("a4")).toBeUndefined();
+  });
+
+  it("does not link run or native items by text, and follows a moved imported clone", () => {
+    const transcript = importedTranscript();
+    const items: ReadonlyArray<OrchestrationV2TurnItem> = [
+      ...importedItems().flatMap((item) =>
+        item.id === TurnItemId.make("imp:2")
+          ? [{ ...item, forkTranscriptHidden: true as const }]
+          : item.id === TurnItemId.make("imp:7")
+            ? [{ ...item, runId: RUN_1 }]
+            : [item],
+      ),
+      importedAssistant(9, "Looking."),
+      makeAssistantItem({
+        id: TurnItemId.make("live:other"),
+        nativeId: "other",
+        ordinal: 1_000_003,
+        messageId: MessageId.make("live-msg:other"),
+        text: "Done.",
+      }),
+    ];
+    const mapped = mapUnitsToItems({ transcript, items, threadId: THREAD_ID });
+
+    expect(mapped.get("a1")).toBeUndefined();
+    expect(mapped.get("a4")).toBeUndefined();
+    expect(mapped.get("a2")?.itemIds).toEqual([TurnItemId.make("imp:3")]);
+
+    const reordered = parseJsonl(
+      `${[
+        entryLine("u1", null, "user", "start"),
+        entryLine("a3", "u1", "assistant", textBlocks("Part one"), "m3"),
+        entryLine("a1", "a3", "assistant", textBlocks("Looking."), "m1"),
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n")}\n`,
+    );
+    const moved = mapUnitsToItems({
+      transcript: reordered,
+      items: [
+        importedUser(1, "start"),
+        { ...importedAssistant(2, "Looking."), forkTranscriptHidden: true as const },
+        importedAssistant(3, "Part one"),
+        importedAssistant(4, "Looking."),
+      ],
+      threadId: THREAD_ID,
+    });
+    expect(moved.get("a3")?.itemIds).toEqual([TurnItemId.make("imp:3")]);
+    expect(moved.get("a1")?.itemIds).toEqual([TurnItemId.make("imp:4")]);
+  });
+
   it("maps user, assistant, thinking, and tool units to their T3 items", () => {
     const transcript = parseJsonl(FIXTURE_TEXT);
     const items = fixtureItems();
