@@ -1,5 +1,5 @@
 /* oxlint-disable t3code/no-untranslated-copy -- fork-only English copy */
-import { EyeOffIcon, PencilIcon } from "lucide-react";
+import { EyeOffIcon, FilePenLineIcon } from "lucide-react";
 import { use } from "react";
 
 import { TimelineRowCtx } from "~/components/chat/timelineRowContext";
@@ -32,10 +32,10 @@ function DraftEditButton(props: { readonly locked: boolean; readonly onClick: ()
           data-fork-transcript-edit-button=""
           onClick={props.onClick}
         >
-          <PencilIcon className="size-3" />
+          <FilePenLineIcon className="size-3" />
         </Button>
       </TooltipTrigger>
-      <TooltipPopup side="top">{props.locked ? LOCKED_TOOLTIP : "Edit this entry"}</TooltipPopup>
+      <TooltipPopup side="top">{props.locked ? LOCKED_TOOLTIP : "Edit in place"}</TooltipPopup>
     </Tooltip>
   );
 }

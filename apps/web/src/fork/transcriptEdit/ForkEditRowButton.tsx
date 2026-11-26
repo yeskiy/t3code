@@ -1,7 +1,7 @@
 /* oxlint-disable t3code/no-untranslated-copy -- fork-only English copy */
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import type { OrchestrationV2ProjectedTurnItem, ScopedThreadRef } from "@t3tools/contracts";
-import { PencilIcon } from "lucide-react";
+import { FilePenLineIcon } from "lucide-react";
 import { use, useContext, type MouseEvent } from "react";
 
 import { TimelineRowActivityCtx, TimelineRowCtx } from "~/components/chat/timelineRowContext";
@@ -175,11 +175,11 @@ function EditRowButton(props: {
           onClick={(event) => void onClick(event)}
           onKeyDown={(event) => event.stopPropagation()}
         >
-          <PencilIcon className="size-3" />
+          <FilePenLineIcon className="size-3" />
         </Button>
       </TooltipTrigger>
       <TooltipPopup side="top">
-        {block === null || block === "setting-off" ? "Edit this entry" : BLOCK_TOOLTIP[block]}
+        {block === null || block === "setting-off" ? "Edit in place" : BLOCK_TOOLTIP[block]}
       </TooltipPopup>
     </Tooltip>
   );
