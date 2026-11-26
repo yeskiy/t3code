@@ -40,7 +40,7 @@ vi.mock(import("./transcriptEditRpc"), async () => {
   const command = (label: string, run: (input: unknown) => unknown) => ({
     label,
     run: (_registry: unknown, args: { readonly input: unknown }) =>
-      Effect.sync(() => run(args.input)),
+      Effect.promise(async () => run(args.input)),
   });
   return {
     forkTranscriptLoad: command("load", (input) => rpc.load(input)),
@@ -370,7 +370,7 @@ const checkboxOf = (container: HTMLElement, unitKey: string) =>
 const barButton = (name: string) => {
   const bar = document.querySelector<HTMLElement>("[data-fork-transcript-select-bar]");
   const match = [...(bar?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-    (button) => button.textContent?.trim() === name,
+    (button) => (button.getAttribute("aria-label") ?? button.textContent?.trim()) === name,
   );
   if (match === undefined) throw new Error(`Missing bar button ${name}`);
   return match;
@@ -422,8 +422,8 @@ describe("ForkTranscriptSelect", () => {
 
     await startSelectMode(screen);
     expect(rpc.load).toHaveBeenCalledTimes(1);
-    expect(document.querySelector("[data-fork-transcript-select-bar]")?.textContent).toContain(
-      "0 selected",
+    expect(document.querySelector("[data-fork-transcript-select-count]")?.textContent).toBe(
+      "None selected",
     );
     expect(barButton("Delete").disabled).toBe(true);
 
@@ -447,8 +447,8 @@ describe("ForkTranscriptSelect", () => {
       "u1",
     ]);
     expect(selectable(screen.container, "a1").dataset.selected).toBe("true");
-    expect(document.querySelector("[data-fork-transcript-select-bar]")?.textContent).toContain(
-      "4 selected",
+    expect(document.querySelector("[data-fork-transcript-select-count]")?.textContent).toBe(
+      "4 of 6 selected",
     );
 
     await act(async () => barButton("Delete").click());
@@ -518,11 +518,11 @@ describe("ForkTranscriptSelect", () => {
 
     await userEvent.click(checkboxOf(screen.container, "a2"));
     await userEvent.click(checkboxOf(screen.container, "a3"));
-    expect(barButton("Insert after").disabled).toBe(true);
+    expect(barButton("Insert below").disabled).toBe(true);
     await userEvent.click(checkboxOf(screen.container, "a3"));
-    expect(barButton("Insert after").disabled).toBe(false);
+    expect(barButton("Insert below").disabled).toBe(false);
 
-    await act(async () => barButton("Insert after").click());
+    await act(async () => barButton("Insert below").click());
     const lane = screen.container
       .querySelector('[data-timeline-row-id="entry-a2"]')!
       .closest<HTMLElement>("[data-timeline-root]")!;
@@ -636,6 +636,86 @@ describe("ForkTranscriptSelect", () => {
       expect(landed).toHaveBeenCalled();
     });
     probe.remove();
+  });
+
+  it("builds each step from the pending order while the preview is still out", async () => {
+    ready();
+    const gate = Promise.withResolvers<void>();
+    rpc.preview.mockImplementation(async (input) => {
+      await gate.promise;
+      return previewFor(input);
+    });
+    using _thread = mockThread();
+    await using screen = await renderSelect();
+    await startSelectMode(screen);
+
+    await userEvent.click(checkboxOf(screen.container, "a3"));
+    await userEvent.click(checkboxOf(screen.container, "a4"), { modifiers: ["Shift"] });
+    await userEvent.keyboard("{Delete}");
+    await userEvent.click(checkboxOf(screen.container, "a2"));
+    // a2 is the last unit after the delete, so Move down has nothing to do.
+    await userEvent.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    expect(session(screen.threadKey).history.steps.map((item) => item.label)).toEqual([
+      "Deleted 2 messages",
+    ]);
+    expect(barButton("Move up").disabled).toBe(false);
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}{Alt>}{ArrowUp}{/Alt}");
+    expect(
+      session(screen.threadKey)
+        .history.steps.slice(1)
+        .flatMap((item) => item.items.map((pending) => pending.op)),
+    ).toEqual([
+      { kind: "moveUnit", unit: "a2", toIndex: 2 },
+      { kind: "moveUnit", unit: "a2", toIndex: 1 },
+    ]);
+
+    gate.resolve();
+    await expect
+      .poll(() => session(screen.threadKey).preview?.units.map((item) => item.key))
+      .toEqual(["u1", "a2", "a1", "t1"]);
+    expect(barButton("Delete").disabled).toBe(false);
+  });
+
+  it("keeps every option working after Done and a second start", async () => {
+    ready();
+    using _thread = mockThread();
+    await using screen = await renderSelect();
+
+    const round = async (expectedSteps: number) => {
+      await startSelectMode(screen);
+      await userEvent.click(checkboxOf(screen.container, "a2"));
+      await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
+      expect([...session(screen.threadKey).selection.keys].toSorted()).toEqual(["a2", "a3"]);
+      await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+      await act(async () => barButton("Move down").click());
+      await userEvent.keyboard("{Control>}a{/Control}");
+      expect(session(screen.threadKey).selection.keys.size).toBe(BASE_UNITS.length);
+      await userEvent.keyboard("{Escape}");
+      expect(session(screen.threadKey).selection.keys.size).toBe(0);
+      expect(session(screen.threadKey).history.steps).toHaveLength(expectedSteps);
+      await act(async () => barButton("Done").click());
+      expect(session(screen.threadKey).selectMode).toBe(false);
+    };
+    await round(2);
+    await round(4);
+    await userEvent.keyboard("{Control>}z{/Control}{Control>}z{/Control}");
+    await round(4);
+  });
+
+  it("extends the selection with Shift+click on a row body", async () => {
+    ready();
+    using _thread = mockThread();
+    await using screen = await renderSelect();
+    await startSelectMode(screen);
+
+    const body = (key: string) =>
+      selectable(screen.container, key).querySelector<HTMLElement>(
+        "[data-fork-transcript-select-content]",
+      )!;
+    await userEvent.click(body("a2"));
+    await userEvent.click(body("a4"), { modifiers: ["Shift"] });
+    expect([...session(screen.threadKey).selection.keys].toSorted()).toEqual(["a2", "a3", "a4"]);
+    expect(window.getSelection()?.toString() ?? "").toBe("");
   });
 
   it("deletes a file-only entry from its draft row and restores it from the Removed line", async () => {

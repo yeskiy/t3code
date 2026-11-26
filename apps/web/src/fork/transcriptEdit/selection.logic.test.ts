@@ -59,6 +59,12 @@ describe("selection.logic", () => {
     expect(back.anchor).toBe("a1");
   });
 
+  it("extendSelection with an anchor and no keys selects the anchor only", () => {
+    const s = extendSelection({ keys: new Set(), anchor: "a2" }, 1, order);
+    expect([...s.keys]).toEqual(["a2"]);
+    expect(s.anchor).toBe("a2");
+  });
+
   it("extendSelection from empty selects the first unit", () => {
     const s = extendSelection(emptySelection, 1, order);
     expect([...s.keys]).toEqual(["u1"]);

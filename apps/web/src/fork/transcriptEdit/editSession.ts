@@ -46,6 +46,7 @@ export interface ForkTranscriptEditSession {
   readonly load: ForkTranscriptLoadResult | null;
   readonly history: History;
   readonly preview: ForkTranscriptPreviewResult | null;
+  readonly previewSteps: ReadonlyArray<Step>;
   readonly openUnitKeys: ReadonlySet<string>;
   readonly openRowIds: ReadonlySet<string>;
   readonly selectMode: boolean;
@@ -89,6 +90,7 @@ export const emptyEditSession: ForkTranscriptEditSession = {
   load: null,
   history: emptyHistory,
   preview: null,
+  previewSteps: [],
   openUnitKeys: EMPTY_STRING_SET,
   openRowIds: EMPTY_STRING_SET,
   selectMode: false,
@@ -469,8 +471,7 @@ export const createForkTranscriptEditActions = (input: {
       const latest = registry.get(atom);
       if (latest.load === null || latest.history.steps.length === 0) return;
 
-      const ops = flatOps(latest.history);
-      void rpc.preview(threadRef, latest.load.baseKey, ops).then((result) => {
+      void rpc.preview(threadRef, latest.load.baseKey, flatOps(latest.history)).then((result) => {
         if (previewControllers.get(threadKey)?.seq !== seq) return;
         if (result._tag === "Success") {
           update((session) => {
@@ -484,6 +485,7 @@ export const createForkTranscriptEditActions = (input: {
             return {
               ...session,
               preview: result.value,
+              previewSteps: latest.history.steps,
               error: null,
               selection: nextSelection,
             };
@@ -698,6 +700,7 @@ export const createForkTranscriptEditActions = (input: {
         load: loaded.value,
         history: { steps: replayed.kept, redo: [] },
         preview: replayed.preview,
+        previewSteps: replayed.kept,
         openUnitKeys: EMPTY_STRING_SET,
         openRowIds: EMPTY_STRING_SET,
         selection: pruneSelection(

@@ -65,6 +65,8 @@ export const extendSelection = (
     const first = orderedKeys[0];
     return first === undefined ? selection : { keys: new Set([first]), anchor: first };
   }
+  const anchor = orderedKeys[anchorIndex];
+  if (selection.keys.size === 0 && anchor !== undefined) return { keys: new Set([anchor]), anchor };
 
   const selectedIndices = orderedKeys.flatMap((key, index) =>
     selection.keys.has(key) ? [index] : [],

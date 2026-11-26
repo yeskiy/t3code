@@ -9,7 +9,8 @@ Edit the full transcript of a Claude thread in place inside the chat timeline. C
 - **Row actions:** The edit form "More" menu offers Delete, Move up, Move down, Insert a message above, and Insert a message below (insert is not shown on tool units).
 - **Pending changes and save bar:** No single edit, move, insert, or delete writes to disk alone. Every change stays pending as a step and previews in place in the timeline. Changed rows get a 2 px primary left border and a badge (`Edited`, `Moved`, `Moved and edited`, `Inserted`, `Moved here`, or `Cannot apply`). Removed rows collapse to one muted line with `Removed` and `Restore`. Inserted and moved units render as draft rows.
 - **Review and one-write save:** One sticky save bar above the composer shows the pending change count, validation status, Undo, Redo, Select, Review changes, Discard, and Save. While changes are pending, Send is disabled in the composer while composer text stays intact. "Review changes" opens a dialog with all pending changes and a word diff for edited text. "Save" writes all changes to the session file in one atomic write.
-- **Select mode:** Start Select mode with `Mod+Alt+S`, the thread menu item "Select messages", or "Select" in the save bar. A 28 px gutter adds checkboxes and a drag grip to each selectable row (a collapsed tool group uses one checkbox for its units, and locked entries show a disabled checkbox). Click, Shift+click ranges, drag over checkboxes to select or clear rows, or drag the grip (with `@dnd-kit/core`) to move one or more units. Bulk actions are Delete, Move up, Move down, Move to..., Remove thinking, Insert before, Insert after, Select all, and Done. Each bulk action is one undo step.
+- **Select mode:** Start Select mode with `Mod+Alt+S`, the thread menu item "Select messages", or "Select" in the save bar. A 28 px gutter adds checkboxes and a drag grip to each selectable row (a collapsed tool group uses one checkbox for its units, and locked entries show a disabled checkbox). Click, Shift+click ranges, drag over checkboxes to select or clear rows, or drag the grip (with `@dnd-kit/core`) to move one or more units. The Select bar shows the count as "N of M selected" and groups the actions: Select all or Clear, then Move up, Move down, and Move to..., then Insert above and Insert below, then Remove thinking and Delete, and Done. A disabled action shows the reason in its tooltip. Each bulk action is one undo step. A bar press keeps the focus in the timeline, so the Select keys keep working after it.
+- **Pending order:** Every bulk action, key, drag, and insert builds its step from the unit order with all pending steps applied (`pendingUnits.logic.ts`). Move and delete steps apply locally with the server rules, so a second action before the preview returns gets a correct index. After an insert or a removed thinking block, the actions wait until the preview returns ("Updating the preview...").
 - **Undo, redo, and revert:** Use the save bar buttons, `Mod+Z`, or `Mod+Shift+Z` to undo or redo steps. Revert one step from the pending-changes popover or a row marker, or restore one unit from its removed row.
 
 ## Providers
@@ -61,7 +62,7 @@ The Claude session file (`<configDir>/projects/<slug>/<sessionId>.jsonl`) is the
 | `Mod+A`                             | Select mode with focus in the timeline                            | Select all selectable units                                                       |
 | `Shift+ArrowUp` / `Shift+ArrowDown` | Select mode with focus in the timeline                            | Extend the selection up or down                                                   |
 | `Alt+ArrowUp` / `Alt+ArrowDown`     | Select mode with focus in the timeline                            | Move the selected units up or down                                                |
-| `Delete`                            | Select mode with focus in the timeline                            | Delete the selected units                                                         |
+| `Delete`                            | Select mode with focus in the timeline                            | Delete the selected units. The next unit becomes the anchor for `Shift+Arrow`     |
 | `Shift+click`                       | Select mode on a row or checkbox                                  | Select a range from the anchor to the clicked row                                 |
 | Drag over checkboxes                | Select mode                                                       | Select or clear rows along the pointer path with edge auto-scroll                 |
 | Drag grip handle                    | Select mode                                                       | Move the dragged unit or full selection before or after another row               |
@@ -84,11 +85,33 @@ The Claude session file (`<configDir>/projects/<slug>/<sessionId>.jsonl`) is the
 
 ## Known gaps
 
+- Imported history items have no Claude native item reference, so imported assistant messages do not link to their file units. In an edit session each one also shows as a muted "Not shown in the timeline" row.
 - A moved user unit restored by `remirror` can keep the wrong copy visible.
 - An edited user message in imported history is matched by text only.
 - A turn queued during a stop makes the save fail after 20 s.
 - "Insert above" for a middle unit of a multi-unit work row opens at the row edge with a "Goes before" note.
 - `Mod+Alt+S` can clash with AltGr on some keyboard layouts.
+
+## End-to-end test
+
+The e2e test runs the real dev stack (server and web) on a fresh, isolated home and drives the plan checklist in Chromium with Playwright. It calls no model. It is not part of CI.
+
+Run it from the repository root on Windows, with the Vite+ Node on `PATH`:
+
+```powershell
+node fork/e2e/transcript-edit/run.ts
+```
+
+| Option              | Default                               | Purpose                                                                |
+| ------------------- | ------------------------------------- | ---------------------------------------------------------------------- |
+| `--dir <folder>`    | `E:/t3fork/e2e` (or `T3FORK_E2E_DIR`) | Parent folder. Each run makes a new `run-<time>` folder in it          |
+| `--port-offset <n>` | `4200`                                | Start offset for the dev runner ports (server 13773 + n, web 5733 + n) |
+| `--headed`          | off                                   | Show the browser window                                                |
+
+- **Isolation:** The run folder holds the T3 home (`--home-dir`, `--no-seed`, `--no-auto-bootstrap-project-from-cwd`), `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and the workspace. The runner refuses a folder inside `~/.t3`, `~/.claude`, or `~/.claude-pag`. Codex is off in the test settings.
+- **Fixtures:** `fixtures.ts` writes two Claude sessions: a chat with thinking, a tool call, and five turns, and a session with a `compact_boundary` entry. The welcome page imports both, so the threads are `import:claudeAgent:<sessionId>`.
+- **Checklist:** edit, insert, delete, and move from the edit form, undo and redo, the review dialog, Save with a check of the session file and the backup, four rounds of every Select option (after exit and start, after Discard, after Save), a delete and a move inside a delayed preview, restore of the first backup from the thread menu, and Select mode in the compacted thread.
+- **Result:** The runner prints `PASS` or `FAIL` for each step and exits with 0 or 1. The run folder keeps `e2e.log`, `dev.log`, and `failure.html` for a failed step.
 
 ## Files and hook points
 
@@ -108,6 +131,7 @@ The Claude session file (`<configDir>/projects/<slug>/<sessionId>.jsonl`) is the
 | `apps/server/src/fork/transcriptEdit/upstreamNames.test.ts`     | Guards upstream symbol names that the fork depends on                                                                                     |
 | `apps/web/src/fork/transcriptEdit/`                             | Per-thread edit session atoms, inline edit form, pending markers, save bar, review, backups, Select mode, drag and drop, and Settings row |
 | `apps/web/src/fork/toolCallBackground/foregroundToolContext.ts` | Merges transcript shortcut context flags into shared fork keybinding context                                                              |
+| `fork/e2e/transcript-edit/`                                     | End-to-end test: isolated dev stack, fixture sessions, and the Playwright checklist                                                       |
 | `fork/features/transcript-edit.md`                              | This feature document                                                                                                                     |
 
 ### Upstream hook files

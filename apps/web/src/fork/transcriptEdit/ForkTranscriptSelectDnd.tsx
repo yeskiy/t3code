@@ -32,6 +32,7 @@ import {
   type ForkTranscriptEditSession,
   forkTranscriptEditSessionAtom,
 } from "./editSession";
+import { pendingUnits } from "./pendingUnits.logic";
 import { emptySelection, extendSelection, paintSelection, selectAll } from "./selection.logic";
 import { useForkTranscriptEditEnabled } from "./transcriptEditSetting";
 
@@ -60,8 +61,9 @@ const POPUP_SELECTOR = '[role="dialog"],[role="alertdialog"],[role="menu"],[role
 const EDGE_PX = 32;
 const SCROLL_STEP_PX = 16;
 
-const activeUnits = (session: ForkTranscriptEditSession) =>
-  session.preview?.units ?? session.load?.units ?? [];
+// Selection keys need only an order, so they fall back to the last preview while it catches up.
+const orderUnits = (session: ForkTranscriptEditSession) =>
+  pendingUnits(session) ?? session.preview?.units ?? session.load?.units ?? [];
 
 const keysOf = (element: Element) =>
   (element.getAttribute("data-fork-transcript-select-keys") ?? "")
@@ -83,6 +85,23 @@ const collision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
   return within.length > 0 ? within : closestCenter(args);
 };
+
+/** After a Select action, moves focus back to the anchor row if it fell to the body or the composer. */
+export const restoreSelectFocus = (anchor: () => string | null) =>
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active !== null && active !== document.body && !isEditableFocused(active)) return;
+      const key = anchor();
+      const row =
+        key === null
+          ? null
+          : document.querySelector(`[data-fork-transcript-select-keys~="${CSS.escape(key)}"]`);
+      (row ?? document.querySelector(`${KEYS_SELECTOR}[data-selected="true"]`))
+        ?.querySelector<HTMLElement>("[data-fork-transcript-select-checkbox]")
+        ?.focus({ preventScroll: true });
+    }),
+  );
 
 const swallowClick = (event: MouseEvent) => {
   event.preventDefault();
@@ -112,7 +131,7 @@ function ForkTranscriptSelectProvider(props: {
 
   const startPaint = useStableCallback((start: PaintStart) => {
     const base = read().selection;
-    const order = selectableUnitKeys(activeUnits(read()));
+    const order = selectableUnitKeys(orderUnits(read()));
     const scroller = scrollParentOf(start.element);
     const state = { painted: false, x: 0, y: 0, frame: 0 };
     const paintAt = () => {
@@ -164,8 +183,8 @@ function ForkTranscriptSelectProvider(props: {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest(POPUP_SELECTOR) != null) return;
     const session = read();
-    const units = activeUnits(session);
-    const order = selectableUnitKeys(units);
+    const units = pendingUnits(session);
+    const order = selectableUnitKeys(orderUnits(session));
     const mod = isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey;
     const plain = !mod && !event.altKey && !event.shiftKey;
     const vertical = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : null;
@@ -185,11 +204,15 @@ function ForkTranscriptSelectProvider(props: {
         return () => actions().setSelection(extendSelection(session.selection, vertical, order));
       }
       if (vertical !== null && event.altKey && !mod && !event.shiftKey) {
-        const step = bulkMoveStep(units, session.selection.keys, { direction: vertical });
+        const step =
+          units === null
+            ? null
+            : bulkMoveStep(units, session.selection.keys, { direction: vertical });
         return () => (step === null ? undefined : actions().addStep(step));
       }
       if (event.key === "Delete" && plain) {
-        return () => deleteSelection(actions(), units, session.selection);
+        return () =>
+          units === null ? undefined : deleteSelection(actions(), units, session.selection);
       }
       return null;
     })();
@@ -197,6 +220,7 @@ function ForkTranscriptSelectProvider(props: {
     event.preventDefault();
     event.stopPropagation();
     run();
+    if (event.key !== "Escape") restoreSelectFocus(() => read().selection.anchor);
   });
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- listens for the Select mode keys only while the mode is on
@@ -214,7 +238,7 @@ function ForkTranscriptSelectProvider(props: {
     const keys = (active.data.current?.keys ?? []) as ReadonlyArray<string>;
     const session = read();
     const moving = keys.some((key) => session.selection.keys.has(key))
-      ? selectableUnitKeys(activeUnits(session)).filter((key) => session.selection.keys.has(key))
+      ? selectableUnitKeys(orderUnits(session)).filter((key) => session.selection.keys.has(key))
       : keys;
     if (moving === keys) actions().setSelection({ keys: new Set(keys), anchor: keys[0] ?? null });
     dragKeys.current = moving;
@@ -238,7 +262,8 @@ function ForkTranscriptSelectProvider(props: {
     const drop = registry.get(forkTranscriptDropTargetAtom);
     clearDrop();
     if (over === null || drop === null || drop.itemId !== String(over.id)) return;
-    const units = activeUnits(read());
+    const units = pendingUnits(read());
+    if (units === null) return;
     const targetKeys = ((over.data.current?.keys ?? []) as ReadonlyArray<string>).filter((key) =>
       units.some((unit) => unit.key === key),
     );

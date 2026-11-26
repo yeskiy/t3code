@@ -12,6 +12,7 @@ import { useForkTranscriptEditActions, useForkTranscriptEditSession } from "./ed
 import { focusEditButton } from "./ForkTranscriptUnitForm";
 import { insertStep } from "./pendingLooks.logic";
 import { forkTranscriptInsertTargetAtom, type InsertTarget } from "./pendingState";
+import { pendingUnits } from "./pendingUnits.logic";
 
 /** A draft composer that adds one "Inserted message" step above or below a unit. */
 export function ForkTranscriptInsertComposer(props: {
@@ -29,7 +30,7 @@ export function ForkTranscriptInsertComposer(props: {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves focus into the composer once it opens
   useLayoutEffect(() => fieldRef.current?.focus(), []);
-  const units = session.preview?.units ?? session.load?.units ?? [];
+  const units = pendingUnits(session) ?? session.preview?.units ?? session.load?.units ?? [];
   const targetUnit = units.find((unit) => unit.key === target.unitKey);
   if (session.load === null || targetUnit === undefined) return null;
   const edgeKey = target.position === "above" ? props.rowUnitKeys?.[0] : props.rowUnitKeys?.at(-1);

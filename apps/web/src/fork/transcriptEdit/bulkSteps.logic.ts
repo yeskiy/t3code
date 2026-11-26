@@ -174,9 +174,13 @@ export const deleteSelection = (
 ): void => {
   const step = bulkDeleteStep(units, selection.keys);
   if (step === null) return;
+  const order = selectableUnitKeys(units);
+  const last = order.findLastIndex((key) => step.unitKeys.includes(key));
+  const kept = (key: string) => !step.unitKeys.includes(key);
   actions.addStep(step);
+  // The next kept unit becomes the anchor, so Shift+Arrow continues from the deleted place.
   actions.setSelection({
-    keys: new Set([...selection.keys].filter((key) => !step.unitKeys.includes(key))),
-    anchor: null,
+    keys: new Set([...selection.keys].filter(kept)),
+    anchor: order.slice(last + 1).find(kept) ?? order.slice(0, last).findLast(kept) ?? null,
   });
 };

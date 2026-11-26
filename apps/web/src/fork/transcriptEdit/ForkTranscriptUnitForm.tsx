@@ -6,6 +6,7 @@ import { TimelineRowCtx } from "~/components/chat/timelineRowContext";
 import { useForkTranscriptEditActions, useForkTranscriptEditSession } from "./editSession";
 import { ForkTranscriptEditForm } from "./ForkTranscriptEditForm";
 import { forkTranscriptInsertTargetAtom } from "./pendingState";
+import { pendingUnits } from "./pendingUnits.logic";
 
 const EDIT_BUTTON_SELECTOR = "[data-fork-transcript-edit-button]";
 
@@ -34,7 +35,7 @@ export function ForkTranscriptUnitForm(props: {
     <div className="pb-4">
       <ForkTranscriptEditForm
         unit={unit}
-        units={session.preview?.units ?? load.units}
+        units={pendingUnits(session) ?? session.preview?.units ?? load.units}
         inherited={load.links.some((link) => link.unitKey === unit.key && link.inherited)}
         baseKey={load.baseKey}
         threadRef={ctx.threadRef}

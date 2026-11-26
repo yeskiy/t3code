@@ -184,7 +184,7 @@ describe("bulkSteps.logic", () => {
     expect(dropAfterKey(UNITS.slice(1), ["u1"], "before")).toBeNull();
   });
 
-  it("deletes the selection in one step and takes the deleted units out of it at once", () => {
+  it("deletes the selection in one step and anchors the next kept unit", () => {
     const steps: Array<Omit<Step, "id">> = [];
     const selections: Array<Selection> = [];
     deleteSelection(
@@ -194,6 +194,12 @@ describe("bulkSteps.logic", () => {
     );
 
     expect(steps.map((step) => step.label)).toEqual(["Deleted 2 messages"]);
-    expect(selections).toEqual([{ keys: new Set(), anchor: null }]);
+    expect(selections).toEqual([{ keys: new Set(), anchor: "u2" }]);
+    deleteSelection(
+      { addStep: (step) => steps.push(step), setSelection: (next) => selections.push(next) },
+      UNITS,
+      { keys: new Set(["u2"]), anchor: "u2" },
+    );
+    expect(selections.at(-1)).toEqual({ keys: new Set(), anchor: "a3" });
   });
 });

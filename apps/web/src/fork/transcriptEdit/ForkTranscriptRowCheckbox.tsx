@@ -11,6 +11,7 @@ import { cn } from "~/lib/utils";
 import { selectableUnitKeys } from "./bulkSteps.logic";
 import { forkTranscriptEditSessionAtom, useForkTranscriptEditActions } from "./editSession";
 import { forkTranscriptDropTargetAtom, ForkTranscriptSelectCtx } from "./ForkTranscriptSelectDnd";
+import { pendingUnits } from "./pendingUnits.logic";
 import { rangeSelectKeys, toggleKeys } from "./selection.logic";
 
 const LOCKED_TOOLTIP = "This entry is locked. The session needs it.";
@@ -60,7 +61,9 @@ export function ForkTranscriptSelectable(props: {
 
   const toggle = (shift: boolean) => {
     const session = registry.get(forkTranscriptEditSessionAtom(ctx.routeThreadKey));
-    const order = selectableUnitKeys(session.preview?.units ?? session.load?.units ?? []);
+    const order = selectableUnitKeys(
+      pendingUnits(session) ?? session.preview?.units ?? session.load?.units ?? [],
+    );
     actions.setSelection(
       shift
         ? rangeSelectKeys(session.selection, props.selectableKeys, order)
@@ -70,8 +73,12 @@ export function ForkTranscriptSelectable(props: {
   const onContentClick = (event: MouseEvent<HTMLDivElement>) => {
     const hit = event.target instanceof Element ? event.target.closest(INTERACTIVE) : null;
     if (hit !== null && event.currentTarget.contains(hit)) return;
-    if ((window.getSelection()?.toString() ?? "").length > 0) return;
+    if (!event.shiftKey && (window.getSelection()?.toString() ?? "").length > 0) return;
     toggle(event.shiftKey);
+  };
+  // Shift+click extends a range of rows, so it must not start a text selection.
+  const onRowMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.shiftKey) event.preventDefault();
   };
   const onCheckboxPointerDown = (event: PointerEvent<HTMLSpanElement>) => {
     const element = event.currentTarget.closest<HTMLElement>("[data-fork-transcript-select-keys]");
@@ -100,6 +107,7 @@ export function ForkTranscriptSelectable(props: {
       }
       data-fork-transcript-select-keys={canSelect ? props.selectableKeys.join(" ") : undefined}
       data-selected={props.active ? String(props.selected !== "none") : undefined}
+      onMouseDown={canSelect ? onRowMouseDown : undefined}
     >
       {props.active ? (
         <div className="flex w-7 shrink-0 flex-col items-center gap-1 pt-1.5">
