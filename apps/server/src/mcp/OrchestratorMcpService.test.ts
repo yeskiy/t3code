@@ -3416,6 +3416,7 @@ Write content.
             isNonGitProject: () => Effect.succeed(false),
           }),
           Layer.succeed(GitVcsDriver.GitVcsDriver, git),
+          forkDelegationAgentsLayerEmpty, // fork: agent definitions
         );
         yield* Effect.gen(function* () {
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
