@@ -15374,6 +15374,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           // timer keeps their process pinned.
           if (
             progress.state !== "result_available" ||
+            // fork: progress skips monitor wake runs, but the process still runs their turn
+            child.runs.some(isActiveRun) ||
             child.providerThreads.some((thread) => (thread.pendingBackgroundTasks ?? []).length > 0)
           )
             return;

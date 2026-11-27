@@ -4617,16 +4617,24 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
 
 it.layer(layerTest)("delegated tasks across a server restart", (it) => {
   it.effect.each([
-    { name: "releases", key: "", pendingBackgroundTasks: [], released: true },
+    { name: "releases", key: "", pendingBackgroundTasks: [], monitorRun: false, released: true },
     {
       name: "keeps while an unawaited background command runs",
       key: "-background",
       pendingBackgroundTasks: [{ taskId: "dev-server", kind: "command" as const }],
+      monitorRun: false,
+      released: false,
+    },
+    {
+      name: "keeps while a monitor wake runs",
+      key: "-monitor",
+      pendingBackgroundTasks: [],
+      monitorRun: true,
       released: false,
     },
   ])(
     "queues a child result without creating a provider history handoff and $name its process",
-    ({ key, pendingBackgroundTasks, released }) =>
+    ({ key, pendingBackgroundTasks, monitorRun, released }) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -4709,6 +4717,58 @@ it.layer(layerTest)("delegated tasks across a server restart", (it) => {
             },
           ],
         });
+        if (monitorRun) {
+          const wakeRunId = RunId.make(`run:result-message${key}-child-wake`);
+          const wakeMessageId = MessageId.make(`message:result-message${key}-child-wake`);
+          yield* eventSink.write({
+            commandId: CommandId.make(`command:result-message${key}-child-wake`),
+            events: [
+              {
+                id: EventId.make(`event:result-message${key}-child-wake-message`),
+                type: "message.updated",
+                threadId: child.childThreadId,
+                runId: wakeRunId,
+                occurredAt: now,
+                payload: {
+                  id: wakeMessageId,
+                  threadId: child.childThreadId,
+                  runId: wakeRunId,
+                  nodeId: null,
+                  role: "user",
+                  text: "Background task completed.",
+                  attachments: [],
+                  streaming: false,
+                  notification: {
+                    source: { kind: "monitor" },
+                    outcome: "updated",
+                    summary: "Monitor reported new output",
+                  },
+                  createdBy: "agent",
+                  creationSource: "provider",
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              },
+              {
+                id: EventId.make(`event:result-message${key}-child-wake-run`),
+                type: "run.updated",
+                threadId: child.childThreadId,
+                runId: wakeRunId,
+                occurredAt: now,
+                payload: {
+                  ...childProjection.runs[0]!,
+                  id: wakeRunId,
+                  ordinal: 2,
+                  providerThreadId,
+                  userMessageId: wakeMessageId,
+                  status: "running",
+                  startedAt: now,
+                  completedAt: null,
+                },
+              },
+            ],
+          });
+        }
 
         yield* orchestrator.recoverDelegatedTasks;
         const recovered = yield* orchestrator.getThreadProjection(threadId);
@@ -4717,8 +4777,8 @@ it.layer(layerTest)("delegated tasks across a server restart", (it) => {
         assert.isNotNull(task.result);
         assert.isEmpty(recovered.contextHandoffs);
         assert.equal(recovered.contextTransfers.length, 1);
-        // A one-process-per-thread child releases its process once its result is recorded,
-        // unless background work it did not await would die with it.
+        // A one-process-per-thread child releases its process once its result is recorded, unless
+        // background work it did not await, or a monitor wake it runs, would die with it.
         assert.equal(
           (yield* orchestrator.getThreadProjection(child.childThreadId)).providerSessions.length,
           released ? 0 : 1,

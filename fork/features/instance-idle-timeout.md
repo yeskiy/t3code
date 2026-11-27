@@ -27,15 +27,23 @@ The optional `idleTimeoutMinutes` field lives on the provider instance envelope 
 3. `ProviderInstanceRegistry` excludes `idleTimeoutMinutes` from `runtimeEqual`, so changing the value in Settings does not close or restart live provider instances.
 4. Forced closes through `ProviderSessionManager.detach` (such as settling a thread) stay unchanged.
 
+## Release of a finished delegate
+
+When a delegated child has its result and no unawaited background work, `Orchestrator.releaseFinishedDelegateSessions` detaches its per-thread provider session. This close does not use the idle timer, so `idleTimeoutMinutes` has no effect on it.
+
+`delegatedTaskProgress` skips a monitor wake run (a run that a `monitor` notification with outcome `updated` started), because such a run is not the work of the task. The child process still runs that turn, however. For this reason, the release also waits until the child has no active run (`isActiveRun`). The idle timer then releases the process after that run ends.
+
 ## Hook points
 
-| File                                                         | Change                                                                                                 |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `packages/contracts/src/providerInstance.ts`                 | Spread `ForkInstanceIdleTimeoutFields` into `ProviderInstanceConfig`.                                  |
-| `packages/contracts/src/index.ts`                            | Re-export `./forkInstanceIdleTimeout.ts`.                                                              |
-| `apps/server/src/orchestration-v2/ProviderSessionManager.ts` | Resolve `idleTimeoutFor(runtime)` from `ServerSettingsService` through `resolveInstanceIdleTimeoutMs`. |
-| `apps/server/src/provider/ProviderInstanceRegistry.ts`       | Exclude `idleTimeoutMinutes` in `withoutPresentation` so edits do not restart live instances.          |
-| `apps/web/src/components/settings/ProviderInstanceCard.tsx`  | Mount `ForkInstanceIdleTimeoutRow` in the Runtime section for every instance.                          |
+| File                                                                   | Change                                                                                                 |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `packages/contracts/src/providerInstance.ts`                           | Spread `ForkInstanceIdleTimeoutFields` into `ProviderInstanceConfig`.                                  |
+| `packages/contracts/src/index.ts`                                      | Re-export `./forkInstanceIdleTimeout.ts`.                                                              |
+| `apps/server/src/orchestration-v2/ProviderSessionManager.ts`           | Resolve `idleTimeoutFor(runtime)` from `ServerSettingsService` through `resolveInstanceIdleTimeoutMs`. |
+| `apps/server/src/orchestration-v2/Orchestrator.ts`                     | Keep a finished delegate's session while the child has an active run.                                  |
+| `apps/server/src/orchestration-v2/DelegatedCompletionDelivery.test.ts` | Test that a monitor wake run keeps the finished delegate's session.                                    |
+| `apps/server/src/provider/ProviderInstanceRegistry.ts`                 | Exclude `idleTimeoutMinutes` in `withoutPresentation` so edits do not restart live instances.          |
+| `apps/web/src/components/settings/ProviderInstanceCard.tsx`            | Mount `ForkInstanceIdleTimeoutRow` in the Runtime section for every instance.                          |
 
 ## Turn off
 
