@@ -19,6 +19,8 @@ import {
 } from "../ui/dialog";
 import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPanel";
 import { ShellCommandBlock } from "./ShellCommandBlock";
+// fork: per-item Stop
+import { ForkBackgroundTaskActions } from "~/fork/backgroundWorkStop/ForkBackgroundTaskStop";
 
 export function BackgroundWorkDetails(props: {
   readonly environmentId: EnvironmentId;
@@ -79,11 +81,19 @@ export function BackgroundWorkDetails(props: {
                 <section key={task.taskId} className="space-y-2 text-sm">
                   <div className="flex items-baseline justify-between gap-3">
                     <h3 className="font-medium">{title}</h3>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {backgroundWorkHoldsCompletion([task])
-                        ? gt("Waiting", { $context: "status of background work" })
-                        : gt("Running", { $context: "status of background work" })}
-                    </span>
+                    {/* fork: per-item Stop after the status */}
+                    <ForkBackgroundTaskActions
+                      environmentId={props.environmentId}
+                      threadId={props.threadId}
+                      task={task}
+                      turnItems={props.turnItems}
+                    >
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {backgroundWorkHoldsCompletion([task])
+                          ? gt("Waiting", { $context: "status of background work" })
+                          : gt("Running", { $context: "status of background work" })}
+                      </span>
+                    </ForkBackgroundTaskActions>
                   </div>
                   {command ? (
                     <div className="rounded-md border border-border bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap break-words">

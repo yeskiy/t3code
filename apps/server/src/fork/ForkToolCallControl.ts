@@ -1,6 +1,8 @@
 import {
+  ForkBackgroundTaskStopError,
   ForkToolCallControlError,
   type ForkMoveToolCallToBackgroundInput,
+  type ForkStopBackgroundTaskInput,
   type ForkStopToolCallInput,
   isProviderNativeSubagentThread,
   type OrchestrationV2TurnItem,
@@ -30,6 +32,9 @@ export class ForkToolCallControl extends Context.Service<
       input: ForkMoveToolCallToBackgroundInput,
     ) => Effect.Effect<void, ForkToolCallControlError>;
     readonly stop: (input: ForkStopToolCallInput) => Effect.Effect<void, ForkToolCallControlError>;
+    readonly stopBackgroundTask: (
+      input: ForkStopBackgroundTaskInput,
+    ) => Effect.Effect<void, ForkBackgroundTaskStopError>;
   }
 >()("t3/fork/ForkToolCallControl") {}
 
@@ -158,7 +163,47 @@ const make = Effect.gen(function* () {
     (effect, input) => threadDispatch.withLock(input.threadId, effect),
   );
 
-  return ForkToolCallControl.of({ moveToBackground, stop });
+  // Stops one task from a Claude provider thread's roster, which has no running turn item.
+  const stopBackgroundTask = Effect.fn("ForkToolCallControl.stopBackgroundTask")(
+    function* (input: ForkStopBackgroundTaskInput) {
+      const fail = (reason: ForkBackgroundTaskStopError["reason"], cause?: unknown) =>
+        new ForkBackgroundTaskStopError({
+          threadId: input.threadId,
+          taskId: input.taskId,
+          reason,
+          ...(cause === undefined ? {} : { cause }),
+        });
+      const records = yield* orchestrator
+        .getThreadRecords(input.threadId, ["providerThreads"])
+        .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
+      if (records.thread.deletedAt !== null) return yield* fail("unavailable");
+      const providerThread = records.providerThreads.find(
+        (candidate) =>
+          candidate.appThreadId === input.threadId &&
+          (candidate.pendingBackgroundTasks ?? []).some(
+            (task) => task.taskId === input.taskId && task.kind !== "subagent",
+          ),
+      );
+      if (providerThread === undefined) return yield* fail("not-running");
+      if (providerThread.driver !== "claudeAgent") return yield* fail("unsupported");
+      if (providerThread.providerSessionId == null) return yield* fail("unavailable");
+      const runtime = yield* sessions
+        .get(providerThread.providerSessionId)
+        .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
+      if (Option.isNone(runtime)) return yield* fail("unavailable");
+      const stopCall = runtime.value.stopToolCall;
+      if (stopCall === undefined) return yield* fail("unsupported");
+      // Bounded so a provider that never answers cannot hold the thread lock.
+      const stopped = yield* stopCall({ providerThread, nativeItemId: input.taskId }).pipe(
+        Effect.timeout("15 seconds"),
+        Effect.mapError((cause) => fail("stop-failed", cause)),
+      );
+      if (!stopped) return yield* fail("not-running");
+    },
+    (effect, input) => threadDispatch.withLock(input.threadId, effect),
+  );
+
+  return ForkToolCallControl.of({ moveToBackground, stop, stopBackgroundTask });
 });
 
 export const layer = Layer.effect(ForkToolCallControl, make).pipe(

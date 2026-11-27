@@ -86,6 +86,8 @@ import {
   sliceThoughtPreviewSource,
   thoughtPreviewMarkdown,
 } from "./TimelineWorkEntryRow.logic";
+// fork: restart blocked by background work
+import { ForkRestartBlockedActions } from "~/fork/backgroundWorkStop/ForkRestartBlockedActions";
 
 export function useThreadReadTarget(entry: TimelineWorkEntry, environmentId: EnvironmentId) {
   const rawThreadId = threadReadTargetId(entry);
@@ -411,6 +413,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             </Button>
           </div>
         ) : null}
+        {/* fork: Stop the work that blocks a Claude restart, then send again */}
+        <ForkRestartBlockedActions
+          runId={failureItem.runId}
+          message={failureItem.failure.message}
+        />
         {retryRunId !== null && onRetryWorkspacePreparation ? (
           <div className="ms-7 pb-1">
             <Button

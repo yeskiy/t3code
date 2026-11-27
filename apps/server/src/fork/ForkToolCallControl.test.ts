@@ -409,3 +409,77 @@ describe("ForkToolCallControl.stop", () => {
     }),
   );
 });
+
+describe("ForkToolCallControl.stopBackgroundTask", () => {
+  const withRoster = (driver = "claudeAgent") =>
+    ({
+      ...makeProviderThread(driver),
+      pendingBackgroundTasks: [
+        { taskId: "b7k2", kind: "command", nativeItemId: "toolu_9" },
+        { taskId: "a1", kind: "subagent" },
+      ],
+    }) as unknown as OrchestrationV2ProviderThread;
+  const stopTask = (input: {
+    readonly taskId: string;
+    readonly providerThread?: OrchestrationV2ProviderThread;
+    readonly stopped?: boolean;
+  }) => {
+    const calls: Array<string> = [];
+    const runtime = {
+      stopToolCall: (args: { readonly nativeItemId: string }) =>
+        Effect.sync(() => calls.push(args.nativeItemId)).pipe(Effect.as(input.stopped ?? true)),
+    } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+    const layer = ForkToolCallControl.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(Orchestrator.OrchestratorV2)({
+            getThreadRecords: () =>
+              Effect.succeed({
+                thread: { deletedAt: null },
+                providerThreads: [input.providerThread ?? withRoster()],
+              } as never),
+          }),
+          Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+            get: () => Effect.succeedSome(runtime),
+          }),
+        ),
+      ),
+    );
+    return ForkToolCallControl.ForkToolCallControl.use((control) =>
+      control.stopBackgroundTask({ threadId, taskId: input.taskId }),
+    ).pipe(
+      Effect.result,
+      Effect.map((result) => ({
+        reason: result._tag === "Failure" ? result.failure.reason : null,
+        calls,
+      })),
+      Effect.provide(layer),
+    );
+  };
+
+  it.effect("stops a roster command by its task id", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* stopTask({ taskId: "b7k2" }), {
+        reason: null,
+        calls: ["b7k2"],
+      });
+    }),
+  );
+
+  it.effect("rejects a subagent, an unknown task, and a non-Claude thread", () =>
+    Effect.gen(function* () {
+      assert.equal((yield* stopTask({ taskId: "a1" })).reason, "not-running");
+      assert.equal((yield* stopTask({ taskId: "missing" })).reason, "not-running");
+      assert.equal(
+        (yield* stopTask({ taskId: "b7k2", providerThread: withRoster("codex") })).reason,
+        "unsupported",
+      );
+    }),
+  );
+
+  it.effect("reports a task the provider no longer runs", () =>
+    Effect.gen(function* () {
+      assert.equal((yield* stopTask({ taskId: "b7k2", stopped: false })).reason, "not-running");
+    }),
+  );
+});

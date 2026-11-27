@@ -12,3 +12,8 @@ export const forkStopToolCall = createEnvironmentRpcCommand(connectionAtomRuntim
   label: "environment-data:fork:stop-tool-call",
   tag: FORK_TOOL_CALL_WS_METHODS.stop,
 });
+
+export const forkStopBackgroundTask = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:fork:stop-background-task",
+  tag: FORK_TOOL_CALL_WS_METHODS.stopBackgroundTask,
+});

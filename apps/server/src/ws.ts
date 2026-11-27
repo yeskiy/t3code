@@ -2127,6 +2127,8 @@ export const layerWsRpc = (
         [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: (input) =>
           forkToolCalls.moveToBackground(input),
         [FORK_TOOL_CALL_WS_METHODS.stop]: (input) => forkToolCalls.stop(input),
+        [FORK_TOOL_CALL_WS_METHODS.stopBackgroundTask]: (input) =>
+          forkToolCalls.stopBackgroundTask(input),
         // fork: delegation agent views.
         ...forkDelegationAgentsRpcHandlers({
           agents: forkDelegationAgents,

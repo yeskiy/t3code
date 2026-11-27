@@ -80,6 +80,8 @@ export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
 // fork: Move to background RPC for one tool call.
 export * from "./forkToolCall.ts";
+// fork: Claude restart blocked by background work
+export * from "./forkClaudeRestart.ts";
 // fork: per-provider MCP tool scope
 export * from "./forkMcpScope.ts";
 // fork: neutral delegation agent definitions

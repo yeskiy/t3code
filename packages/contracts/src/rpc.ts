@@ -49,7 +49,11 @@ import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchema
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 // fork: Move to background and stop RPCs for one tool call.
-import { WsForkMoveToolCallToBackgroundRpc, WsForkStopToolCallRpc } from "./forkToolCall.ts";
+import {
+  WsForkMoveToolCallToBackgroundRpc,
+  WsForkStopBackgroundTaskRpc,
+  WsForkStopToolCallRpc,
+} from "./forkToolCall.ts";
 // fork: delegation agent views.
 import {
   WsForkListDelegationAgentsRpc,
@@ -2778,6 +2782,7 @@ export const WsRpcGroup = RpcGroup.make(
   // fork: Move to background and stop RPCs for one tool call.
   WsForkMoveToolCallToBackgroundRpc,
   WsForkStopToolCallRpc,
+  WsForkStopBackgroundTaskRpc,
   // fork: delegation agent views.
   WsForkListDelegationAgentsRpc,
   WsForkThreadDelegationAgentRpc,

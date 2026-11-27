@@ -93,6 +93,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // fork: Move to background and stop change a running turn, as Stop does.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: AuthOrchestrationOperateScope,
   [FORK_TOOL_CALL_WS_METHODS.stop]: AuthOrchestrationOperateScope,
+  [FORK_TOOL_CALL_WS_METHODS.stopBackgroundTask]: AuthOrchestrationOperateScope,
   // fork: transcript edit.
   [FORK_TRANSCRIPT_EDIT_WS_METHODS.load]: AuthOrchestrationReadScope,
   [FORK_TRANSCRIPT_EDIT_WS_METHODS.preview]: AuthOrchestrationReadScope,

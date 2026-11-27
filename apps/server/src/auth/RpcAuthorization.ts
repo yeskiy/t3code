@@ -54,6 +54,7 @@ export const RPC_REQUIRED_SCOPES = {
   // fork: Move to background and stop change a running turn, as Stop does.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: AuthOrchestrationOperateScope,
   [FORK_TOOL_CALL_WS_METHODS.stop]: AuthOrchestrationOperateScope,
+  [FORK_TOOL_CALL_WS_METHODS.stopBackgroundTask]: AuthOrchestrationOperateScope,
   // fork: delegation agent views only read agent files and the child-to-agent store.
   [FORK_DELEGATION_AGENTS_WS_METHODS.list]: AuthOrchestrationReadScope,
   [FORK_DELEGATION_AGENTS_WS_METHODS.forThread]: AuthOrchestrationReadScope,

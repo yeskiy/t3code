@@ -141,6 +141,10 @@ import {
   type ThreadId,
   resolveIdleCompaction,
   isDelegatedAppThread,
+  // fork: restart blocked by background work
+  ClaudeRestartBlockingItem,
+  ClaudeRestartReason,
+  claudeRestartBlockedMessage,
 } from "@t3tools/contracts";
 
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
@@ -231,7 +235,10 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 // fork: delegate-only bullet derives from T3_CODE_ORCHESTRATION_INSTRUCTIONS in forkOrchestrationInstructions.ts
 import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructions,
+  buildWorkspaceInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
@@ -263,6 +270,13 @@ import {
 import { forkOrchestrationInstructions } from "../../fork/instanceLaunch/forkOrchestrationInstructions.ts";
 // fork: agent definitions
 import { forkClaudeAgentParts } from "../../fork/delegationAgents/delegationHooks.ts";
+// fork: restart reason, blocking work, and folder list updates
+import {
+  claudeRestartBlockingItems,
+  claudeRestartReason,
+  claudeWorkspaceQueryKey,
+  claudeWorkspaceUpdate,
+} from "../../fork/claudeRestart/claudeRestart.ts";
 import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
@@ -938,9 +952,16 @@ class ClaudeMcpRegistrationTimeoutError extends Schema.TaggedError<ClaudeMcpRegi
 
 export class ClaudeBackgroundWorkBlocksQueryReplacementError extends Schema.TaggedError<ClaudeBackgroundWorkBlocksQueryReplacementError>()(
   "ClaudeBackgroundWorkBlocksQueryReplacementError",
-  {},
+  // fork: why Claude must restart and which work would end
+  {
+    reason: Schema.optional(ClaudeRestartReason),
+    blocking: Schema.optional(Schema.Array(ClaudeRestartBlockingItem)),
+  },
 ) {
   override get message(): string {
+    // fork: name the reason and the blocking work
+    if (this.reason !== undefined)
+      return claudeRestartBlockedMessage(this.reason, this.blocking ?? []);
     return "Claude is still running background agents or commands, and this model or setting change would end them. Wait for them to finish, or press Stop, then send the message again.";
   }
 }
@@ -4202,7 +4223,8 @@ export function claudeEffectiveQueryPolicyKey(
   workspace?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["workspace"],
 ): string {
   return JSON.stringify({
-    workspace,
+    // fork: only extra roots reach the launch, so a new folder inside cwd keeps the process
+    workspace: claudeWorkspaceQueryKey(workspace),
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -5835,6 +5857,8 @@ interface ClaudeLiveQueryContext {
   readonly launchArgSettings: ClaudeSdkSettings | undefined;
   readonly query: ClaudeAgentSdkQuerySession;
   readonly queryPolicyKey: string;
+  // fork: the folder list text this process knows
+  workspaceInstructions: string;
   selection: CompiledClaudeModelSelection;
   readonly program: string | undefined;
   readonly startedWithApiModelId: string;
@@ -14344,7 +14368,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             !existing.stopping &&
             (yield* liveProcessRunsBackgroundWork(existing))
           ) {
-            return yield* new ClaudeBackgroundWorkBlocksQueryReplacementError();
+            // fork: name the reason and the blocking work
+            return yield* new ClaudeBackgroundWorkBlocksQueryReplacementError({
+              reason: claudeRestartReason({
+                sameSession: existing.nativeThreadId === nativeThreadId && !turnInput.resume,
+                previousKey: existing.queryPolicyKey,
+                nextKey: queryPolicyKey,
+              }),
+              blocking: claudeRestartBlockingItems({
+                roster: rosterForNativeThread(
+                  yield* Ref.get(pendingBackgroundTasksByNativeThread),
+                  existing.nativeThreadId,
+                ).values(),
+                subagents: [...(yield* Ref.get(sessionSubagentsByTaskId))].flatMap(
+                  ([taskId, subagent]) =>
+                    subagent.task.status === "running" &&
+                    !existing.subagentsFromEarlierProcesses.has(subagent)
+                      ? [{ taskId, title: subagent.task.title, prompt: subagent.task.prompt }]
+                      : [],
+                ),
+              }),
+            });
           }
 
           if (reuseLaunchSettings) {
@@ -14510,6 +14554,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             launchArgSettings,
             query: querySession,
             queryPolicyKey,
+            // fork: the folder list text this process knows
+            workspaceInstructions: buildWorkspaceInstructions(turnInput.runtimePolicy),
             selection: compiledSelection,
             program,
             startedWithApiModelId: compiledSelection.apiModelId,
@@ -14784,7 +14830,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const appContext = turnInput.appContext ?? [];
             const delivered = deliveredAppContext.get(nativeThreadId);
             let appContextSent = false;
-            const userMessage =
+            const preparedUserMessage =
               promptUuid === null
                 ? null
                 : turnInput.resume
@@ -14825,6 +14871,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       Effect.provideService(Path.Path, path),
                     );
             const querySession = yield* openQuery(turnInput, nativeThreadId, queryPolicy);
+            // fork: a kept process learns a changed folder list with this message
+            const workspaceUpdate = claudeWorkspaceUpdate({
+              known: querySession.workspaceInstructions,
+              policy: turnInput.runtimePolicy,
+              message: preparedUserMessage,
+              skip: preparedUserMessage === null || turnInput.resume === true,
+              addContext: (message, entry) =>
+                message === null ? null : withClaudeAppContext(message, [entry], pdfReservation),
+            });
+            const userMessage = workspaceUpdate.message;
             yield* applySessionTitle(querySession.query, nativeThreadId, turnInput.appThread.title);
             const autoCompactWindow = yield* resolveAutoCompactWindow(
               querySession.settingsCwd,
@@ -14980,6 +15036,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               if (offerCommitted) return;
               offerCommitted = true;
               pdfReservation.commit();
+              querySession.workspaceInstructions = workspaceUpdate.known; // fork: folder list sent
               if (appContextSent) {
                 context.appContextOffered = claudeAppContextDigests(appContext);
               }
@@ -16099,7 +16156,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   liveQuery.nativeThreadId,
                 );
                 for (const [candidateTaskId, task] of roster) {
-                  if (task.nativeItemId === nativeItemId) {
+                  // A roster task id also names its task, for work with no running turn item.
+                  if (task.nativeItemId === nativeItemId || candidateTaskId === nativeItemId) {
                     taskId = candidateTaskId;
                     break;
                   }

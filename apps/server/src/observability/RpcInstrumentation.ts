@@ -25,6 +25,7 @@ const RPC_AGGREGATES = {
   // fork: Move to background and stop RPCs for one tool call.
   [FORK_TOOL_CALL_WS_METHODS.moveToBackground]: "orchestration",
   [FORK_TOOL_CALL_WS_METHODS.stop]: "orchestration",
+  [FORK_TOOL_CALL_WS_METHODS.stopBackgroundTask]: "orchestration",
   // fork: delegation agent views.
   [FORK_DELEGATION_AGENTS_WS_METHODS.list]: "orchestration",
   [FORK_DELEGATION_AGENTS_WS_METHODS.forThread]: "orchestration",

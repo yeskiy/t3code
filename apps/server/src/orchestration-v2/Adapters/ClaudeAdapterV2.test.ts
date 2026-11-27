@@ -7382,6 +7382,49 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     );
 
+    // fork: the Background work popup stops a roster task that has no running turn item.
+    it.effect("stops a background shell by its roster task id after the turn settles", () =>
+      Effect.gen(function* () {
+        const stopCalls: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          stopTask: (taskId) => Effect.sync(() => void stopCalls.push(taskId)),
+        });
+        const stopToolCall = harness.runtime.stopToolCall;
+        if (stopToolCall === undefined) return assert.fail("stopToolCall is missing");
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-stop-roster-task"),
+            text: "Start a dev server in the background.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(wakeTaskStarted);
+        yield* harness.offerAndWait(turnOneResult);
+        yield* Queue.take(harness.terminalReceipts);
+        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+        assert.isTrue(
+          yield* stopToolCall({
+            providerThread: harness.providerThread,
+            nativeItemId: WAKE_TASK_ID,
+          }),
+        );
+        assert.deepStrictEqual(stopCalls, [WAKE_TASK_ID]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
     it.effect("stops a running subagent row by its task id", () =>
       Effect.gen(function* () {
         const stopCalls: Array<string> = [];
@@ -10178,6 +10221,109 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.strictEqual(harness.getOpenedOptions(), originalOptions);
         assert.lengthOf(harness.offeredMessages, 4);
         assert.lengthOf(harness.liveSelectionChanges, 3);
+        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
+  // fork: a folder inside cwd keeps the process; a new extra root or model names the blockers.
+  it.effect(
+    "keeps a process with background work for a new folder inside cwd and names blockers for a restart",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        const policy = (workspace?: ProviderAdapter.ProviderAdapterV2RuntimeWorkspace) =>
+          ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            ...CLAUDE_TEST_RUNTIME_POLICY,
+            ...(workspace === undefined ? {} : { workspace }),
+          });
+        const inner = {
+          folders: [
+            { name: "api", path: "/workspace/api", isGitRepository: true },
+            { name: "web", path: "/workspace/web", isGitRepository: true },
+          ],
+          extraRoots: [],
+        };
+        const turn = (
+          ordinal: number,
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+          modelSelection?: ModelSelection,
+        ) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-fork-workspace:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+            runtimePolicy,
+            ...(modelSelection === undefined ? {} : { modelSelection }),
+          });
+        const settle = Effect.gen(function* () {
+          yield* harness.offerAndWait(turnOneResult);
+          yield* Queue.take(harness.terminalReceipts);
+        });
+        const folderNote = (index: number) => {
+          const content = harness.offeredMessages[index]?.message.content;
+          return (Array.isArray(content) ? content : []).flatMap((block) =>
+            block.type === "text" && block.text.startsWith("<external_workspace_folders>")
+              ? [block.text]
+              : [],
+          );
+        };
+
+        yield* harness.runtime.startTurn(turn(1, policy()));
+        const originalOptions = harness.getOpenedOptions();
+        yield* harness.offerAndWait(wakeTaskStarted);
+        yield* settle;
+        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+        assert.deepEqual(folderNote(0), []);
+
+        yield* harness.runtime.startTurn(turn(2, policy(inner)));
+        yield* settle;
+        assert.strictEqual(harness.getOpenedOptions(), originalOptions);
+        const [note] = folderNote(1);
+        assert.include(note, "/workspace/api");
+        assert.include(note, "/workspace/web");
+
+        yield* harness.runtime.startTurn(turn(3, policy(inner)));
+        yield* settle;
+        assert.deepEqual(folderNote(2), []);
+        assert.lengthOf(harness.offeredMessages, 3);
+
+        const refusals = [
+          [4, policy({ ...inner, extraRoots: ["/repos/shared"] }), undefined, "workspace"],
+          [5, policy(inner), CLAUDE_TEST_RESTART_MODEL_SELECTION, "model"],
+        ] as const;
+        yield* Effect.forEach(refusals, ([ordinal, runtimePolicy, selection, reason]) =>
+          harness.runtime.startTurn(turn(ordinal, runtimePolicy, selection)).pipe(
+            Effect.flip,
+            Effect.map((refused) => {
+              assert.instanceOf(
+                refused.cause,
+                ClaudeAdapterV2.ClaudeBackgroundWorkBlocksQueryReplacementError,
+              );
+              const cause =
+                refused.cause as ClaudeAdapterV2.ClaudeBackgroundWorkBlocksQueryReplacementError;
+              assert.equal(cause.reason, reason);
+              assert.deepEqual(cause.blocking, [
+                { taskId: WAKE_TASK_ID, kind: "command", description: WAKE_TASK_DESCRIPTION },
+              ]);
+              assert.include(cause.message, `${WAKE_TASK_DESCRIPTION} (command)`);
+            }),
+          ),
+        );
+        assert.strictEqual(harness.getOpenedOptions(), originalOptions);
         assert.isTrue(yield* harness.hasPendingBackgroundWork);
       }).pipe(
         Effect.provide(
@@ -26157,9 +26303,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const refused = yield* switchTurn("attempt-claude-model-change-running-subagent-b").pipe(
         Effect.flip,
       );
-      assert.equal(
+      // fork: the message names the reason and the running subagent
+      assert.match(
         makeProviderFailure({ cause: refused, class: "provider_error" }).message,
-        new ClaudeAdapterV2.ClaudeBackgroundWorkBlocksQueryReplacementError().message,
+        /^Claude must restart because the model or its settings changed. These background tasks would end: .+ \(agent\)\./u,
       );
       assert.lengthOf(processQueues, 1);
 
