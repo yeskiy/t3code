@@ -15,10 +15,10 @@ import { useLongLivedAssetUrl } from "~/assets/longLivedAssetUrls";
 import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { HtmlRenderDialog } from "./HtmlRenderDialog";
 import { observeResize } from "~/lib/observeResize";
 import { ForkArtifactOpenButton } from "~/fork/artifacts/ForkArtifactOpenButton"; // fork: artifacts panel
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 const MIN_URL_LIFE_MS = 5 * 60_000;
 const MAX_MEASURED_CONTENT_HEIGHTS = 200;
@@ -103,35 +103,36 @@ export function HtmlRenderFrame(props: {
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
             {/* fork: open inline render in the artifacts right panel */}
             <ForkArtifactOpenButton threadRef={props.threadRef} attachmentId={attachmentId} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label={gt("Open full screen")}
-                    size="icon-xs"
-                    variant="glass"
-                    onClick={async () => {
-                      const url =
-                        loaded !== null && loaded.expiresAt - Date.now() > MIN_URL_LIFE_MS
-                          ? src
-                          : await refresh().catch(() => null);
-                      if (url !== null) setExpandedSrc(url);
-                      else
-                        toastManager.add({
-                          type: "error",
-                          title: gt("Page unavailable"),
-                          description: gt("Reconnect to the environment and try again."),
-                        });
-                    }}
-                  />
-                }
-              >
-                <Maximize2Icon className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipPopup side="left">
-                <T>Open full screen</T>
-              </TooltipPopup>
-            </Tooltip>
+            <SharedTooltipTrigger
+              render={
+                <Button
+                  aria-label={gt("Open full screen")}
+                  size="icon-xs"
+                  variant="glass"
+                  onClick={async () => {
+                    const url =
+                      loaded !== null && loaded.expiresAt - Date.now() > MIN_URL_LIFE_MS
+                        ? src
+                        : await refresh().catch(() => null);
+                    if (url !== null) setExpandedSrc(url);
+                    else
+                      toastManager.add({
+                        type: "error",
+                        title: gt("Page unavailable"),
+                        description: gt("Reconnect to the environment and try again."),
+                      });
+                  }}
+                />
+              }
+              label={
+                <>
+                  <T>Open full screen</T>
+                </>
+              }
+              side="left"
+            >
+              <Maximize2Icon className="size-3.5" />
+            </SharedTooltipTrigger>
           </div>
           {expandedSrc !== null ? (
             <HtmlRenderDialog
