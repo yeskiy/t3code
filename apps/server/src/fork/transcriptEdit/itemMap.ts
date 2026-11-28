@@ -156,18 +156,24 @@ const isImportedAssistant = (item: OrchestrationV2TurnItem): item is AssistantMe
   item.runId === null &&
   item.forkTranscriptHidden !== true;
 
-// The importer trims each text block and joins the blocks with newlines.
-const importedText = (entry: Entry): string => {
-  const content = entry.message?.content;
-  if (typeof content === "string") return content.trim();
-  return blocks(entry)
-    .flatMap((block) =>
-      block.type === "text" && typeof block.text === "string" && block.text.trim() !== ""
-        ? [block.text.trim()]
-        : [],
-    )
-    .join("\n");
-};
+// The importer drops leading blank lines and trailing space per block. Older imports trimmed fully.
+const importTrims = [
+  (text: string) => text.replace(/^\s*\n/, "").trimEnd(),
+  (text: string) => text.trim(),
+];
+
+const importedTexts = (entry: Entry): ReadonlyArray<string> =>
+  importTrims.map((trim) => {
+    const content = entry.message?.content;
+    return typeof content === "string"
+      ? trim(content)
+      : blocks(entry)
+          .flatMap((block) =>
+            block.type === "text" && typeof block.text === "string" ? [trim(block.text)] : [],
+          )
+          .filter((text) => text !== "")
+          .join("\n");
+  });
 
 const isImportedRecord = (entry: Entry): boolean =>
   entry.type === "assistant" &&
@@ -232,7 +238,7 @@ const importedByEntry = (
         const entry = entryMap.get(uuid);
         if (entry === undefined || !isImportedRecord(entry)) return [];
         const forms = new Set(
-          [importedText(entry), extractEntryText(entry)].filter(
+          [...importedTexts(entry), extractEntryText(entry)].filter(
             (text) => text !== "" && texts.has(text),
           ),
         );

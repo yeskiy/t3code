@@ -196,7 +196,7 @@ const importedTranscript = () =>
       entryLine("a2", "r1", "assistant", textBlocks("Done."), "m2"),
       entryLine("u2", "a2", "user", "next"),
       entryLine("a3", "u2", "assistant", textBlocks("Part one"), "m3"),
-      entryLine("a3b", "a3", "assistant", textBlocks("  Part two  ", "tail"), "m3"),
+      entryLine("a3b", "a3", "assistant", textBlocks("\n  Part two  ", "tail"), "m3"),
       entryLine("a4", "a3b", "assistant", textBlocks("Done."), "m4"),
       entryLine("u3", "a4", "user", "live"),
       entryLine("a5", "u3", "assistant", textBlocks("Done."), "m5"),
@@ -224,14 +224,15 @@ const importedAssistant = (index: number, text: string) =>
     text,
   });
 
-// The importer keeps one item per text record, trims each block, and joins blocks with newlines.
+// The importer keeps one item per text record and joins blocks with newlines.
+// Each block loses its leading blank lines and trailing space, and keeps its first-line indentation.
 const importedItems = (): ReadonlyArray<OrchestrationV2TurnItem> => [
   importedUser(1, "start"),
   importedAssistant(2, "Looking."),
   importedAssistant(3, "Done."),
   importedUser(4, "next"),
   importedAssistant(5, "Part one"),
-  importedAssistant(6, "Part two\ntail"),
+  importedAssistant(6, "  Part two\ntail"),
   importedAssistant(7, "Done."),
   importedAssistant(8, "Off branch"),
   makeUserItem({
@@ -277,6 +278,15 @@ describe("itemMap", () => {
     expect(entryItem("a2")).toBe(TurnItemId.make("imp:3"));
     expect(entryItem("a4")).toBe(TurnItemId.make("imp:7"));
     expect(entryItem("a5")).toBe(TurnItemId.make("live:a5"));
+  });
+
+  it("links an item that an older import trimmed fully", () => {
+    const transcript = importedTranscript();
+    const items = importedItems().map((item) =>
+      item.id === TurnItemId.make("imp:6") ? importedAssistant(6, "Part two\ntail") : item,
+    );
+    const mapped = mapUnitsToItems({ transcript, items, threadId: THREAD_ID });
+    expect(mapped.get("a3")?.itemIds).toEqual([TurnItemId.make("imp:5"), TurnItemId.make("imp:6")]);
   });
 
   it("links a repeated imported text by its place between unique texts", () => {
