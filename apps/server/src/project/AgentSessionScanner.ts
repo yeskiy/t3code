@@ -46,6 +46,11 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { piHome, resolvePiSessionsDir } from "@t3tools/provider-pi/server/usage";
 import * as ServerSettings from "../serverSettings.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
+// fork: import picked Claude sessions by id
+import {
+  type ForkPickedTranscript,
+  forkPickedCandidates,
+} from "../fork/agentSessionImport/pickedTranscripts.ts";
 import { parseGitfileTarget } from "./worktreeContainer.ts";
 import {
   createTranscriptJsonReader,
@@ -251,6 +256,7 @@ export class AgentSessionScanner extends Context.Service<
     readonly recentThreads: (
       workspaceRoot: string,
       completedSources?: ReadonlyArray<AgentSessionImportSource>,
+      picked?: ReadonlyArray<ForkPickedTranscript>, // fork: import picked Claude sessions by id
     ) => Stream.Stream<AgentSessionRecentThread, AgentSessionScanError>;
   }
 >()("t3/project/AgentSessionScanner") {}
@@ -2179,6 +2185,7 @@ export const make = Effect.gen(function* () {
   const prepareRecentThreads = Effect.fn("AgentSessionScanner.prepareRecentThreads")(function* (
     workspaceRoot: string,
     completedSources: ReadonlyArray<AgentSessionImportSource>,
+    picked?: ReadonlyArray<ForkPickedTranscript>, // fork: import picked Claude sessions by id
   ) {
     const root = path.resolve(expandHomePath(workspaceRoot, homeDir));
     const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
@@ -2190,10 +2197,12 @@ export const make = Effect.gen(function* () {
     const cutoffMs = nowMs - RECENT_THREAD_WINDOW_MS;
 
     // Imports recorded since a budget-truncated collection can free budget for transcripts it cut off.
-    if (cachedCandidates === null || cachedCandidates.metadataTruncated) {
+    // fork: picked sessions skip discovery and the recent-thread window
+    if (picked === undefined && (cachedCandidates === null || cachedCandidates.metadataTruncated)) {
       cachedCandidates = yield* collectCandidates();
     }
-    const { candidates } = cachedCandidates;
+    const candidates =
+      picked === undefined ? (cachedCandidates?.candidates ?? []) : forkPickedCandidates(picked);
 
     // The scan counts a linked worktree's sessions toward its main checkout, so import them with it.
     const candidateDirectories = candidates.flatMap((candidate) => {
@@ -2247,8 +2256,8 @@ export const make = Effect.gen(function* () {
       for (const transcript of candidate.transcripts) {
         if (
           transcript.mtimeMs === null ||
-          transcript.mtimeMs < cutoffMs ||
-          transcript.mtimeMs > nowMs
+          (picked === undefined && // fork: picked sessions skip the recent-thread window
+            (transcript.mtimeMs < cutoffMs || transcript.mtimeMs > nowMs))
         ) {
           continue;
         }
@@ -2468,7 +2477,8 @@ export const make = Effect.gen(function* () {
   const recentThreads: AgentSessionScanner["Service"]["recentThreads"] = (
     workspaceRoot,
     completedSources = [],
-  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources));
+    picked, // fork: import picked Claude sessions by id
+  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources, picked));
 
   return AgentSessionScanner.of({ scan, recentThreads });
 });

@@ -57,6 +57,7 @@ import { ProviderRegistry } from "./ProviderRegistry.ts";
 import budget from "./agentContextBudget.json" with { type: "json" };
 // fork: agent definitions
 import { forkDelegationAgentsLayerEmpty } from "../fork/delegationAgents/delegationHooks.ts";
+import { ForkAgentSessionImport } from "../fork/agentSessionImport/ForkAgentSessionImport.ts"; // fork: agent session import tools
 
 // Registration only stores tool definitions, so the handlers' services are never called.
 const toolHandlerServices = Layer.mergeAll(
@@ -104,6 +105,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(VcsStatusBroadcaster)({}),
   // fork: agent definitions
   forkDelegationAgentsLayerEmpty,
+  Layer.mock(ForkAgentSessionImport)({}), // fork: agent session import tools
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");

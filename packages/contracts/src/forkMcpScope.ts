@@ -76,6 +76,8 @@ export const FORK_MCP_TOOL_GROUPS: ReadonlyArray<ForkMcpToolGroupDefinition> = [
       "t3_attachment_prepare_upload",
       "t3_attachment_discard",
       "t3_thread_send_attachments",
+      "t3_session_import_list",
+      "t3_session_import",
     ],
   },
   {

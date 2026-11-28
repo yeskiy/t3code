@@ -122,6 +122,9 @@ import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolki
 import { MCP_HTTP_PATH } from "../httpCors.ts";
 import { requestUrl } from "../requestUrl.ts";
 import { makeForkMcpScopeVisibilityCheck } from "../fork/mcpScope/McpScopeGuard.ts"; // fork: per-provider MCP tool scope
+// fork: agent session import tools
+import * as ForkAgentSessionImportHandlers from "../fork/agentSessionImport/handlers.ts";
+import { ForkAgentSessionImportToolkit } from "../fork/agentSessionImport/tools.ts";
 import { routineSpan } from "@t3tools/shared/observability";
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
@@ -1549,6 +1552,12 @@ export const layerPullRequestsToolkit = toolkitRegistration(
 
 const layerIssuesToolkit = toolkitRegistration(IssuesToolkit, IssuesHandlers.layer);
 
+// fork: agent session import tools
+const layerForkAgentSessionImportToolkit = toolkitRegistration(
+  ForkAgentSessionImportToolkit,
+  ForkAgentSessionImportHandlers.layer,
+);
+
 const layerDeviceStandardToolkitRegistration = toolkitRegistration(
   DeviceStandardToolkit,
   DeviceHandlers.layerStandard,
@@ -1615,6 +1624,7 @@ export const layerTools = Layer.mergeAll(
   layerDeviceToolkit,
   layerHtmlToolkit,
   layerMessageToolkit,
+  layerForkAgentSessionImportToolkit, // fork: agent session import tools
 );
 
 const enabledWhenFallbackClient = {

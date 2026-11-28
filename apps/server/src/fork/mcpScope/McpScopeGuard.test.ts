@@ -66,6 +66,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { Workflows } from "../../workflows/Workflows.ts";
 import { TaskFolders } from "../../workspace/TaskFolders.ts";
 import { applyForkMcpSessionCapabilities } from "./McpScopeGuard.ts";
+import { ForkAgentSessionImport } from "../agentSessionImport/ForkAgentSessionImport.ts"; // fork: agent session import tools
 
 const environmentId = EnvironmentId.make("env-fork-mcp-scope-test");
 
@@ -113,6 +114,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(Workflows)({}),
   // fork: agent definitions
   forkDelegationAgentsLayerEmpty,
+  Layer.mock(ForkAgentSessionImport)({}), // fork: agent session import tools
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const layerRegisteredTools = Layer.mergeAll(
