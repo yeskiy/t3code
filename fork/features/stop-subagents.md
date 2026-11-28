@@ -26,6 +26,7 @@ This fork ports PR #16852 for the shared stop-scope pipeline and Claude, adapted
   - When no turn is running and background work is still running, the composer Stop button and `thread.stop` shortcut open a confirmation dialog (`Stop background work?`) listing the running background counts (commands, subagents, delegated tasks, monitors, pull request watches, and background tasks) with `Cancel` (default focus, sends nothing) and destructive `Stop all` (runs the same full stop as the Waiting strip Stop).
   - Composer Stop tooltip and `aria-label` reflect the current state: `Stop turn` when only a turn runs, `Stop turn (background work keeps running)` when both a turn and background work run, and `Stop background work` when only background work runs.
   - The Waiting strip Stop button (`useThreadLifecycle.tsx`) sends no scope, so it stops all remaining background work and closes the Claude process.
+  - The upstream test `apps/web/src/components/ChatView.browser.test.tsx` looks for `Stop turn` on a running turn.
 - **Orchestrator and run execution (`apps/server/src/fork/ForkStopScope.ts`, `Orchestrator.ts`, `ProviderTurnControlService.ts`, `EffectOutbox.ts`, `EffectWorker.ts`, `RunExecutionService.ts`):**
   - On an active run (`preparing`, `starting`, `running`), `scope: "turn"` holds the queue and interrupts only the active turn. It keeps pull request watches, delegated tasks, delegated completion wakes, and background work on other provider threads.
   - On a settled run, `scope: "turn"` falls back to a full Stop.

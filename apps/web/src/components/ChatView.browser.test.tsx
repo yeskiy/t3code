@@ -1126,7 +1126,8 @@ it("/feedback with a pending reply runs as feedback and keeps the reply when the
   await expect.element(replyBar).toBeVisible();
   const running = { ...thread.runs[0]!, status: "running" as const, completedAt: null };
   await act(() => emitThreadEvent(thread.id, { type: "run.updated", payload: running }));
-  await expect.element(page.getByRole("button", { name: "Stop generation" })).toBeVisible();
+  // fork: turn-scoped Stop labels the button for a running turn "Stop turn"
+  await expect.element(page.getByRole("button", { name: "Stop turn" })).toBeVisible();
 
   const editor = page.getByTestId("composer-editor");
   await userEvent.click(editor);

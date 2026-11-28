@@ -211,7 +211,7 @@ describe("Artifacts in Show in thread details", () => {
     using _fixture = setup();
     await using screen = await render(<ThreadDetailsItemsRow />);
 
-    const trigger = screen.getByRole("button", { name: "Thread details: 11 of 13 on" });
+    const trigger = screen.getByRole("button", { name: "Thread details: 11 of 14 on" });
     await expect.element(trigger).toBeVisible();
     await expect
       .element(screen.getByRole("button", { name: "Reset thread details to default" }))
@@ -227,7 +227,7 @@ describe("Artifacts in Show in thread details", () => {
 
     expect(getClientSettings().threadDetailsItems).toEqual({ artifacts: false });
     await expect
-      .element(screen.getByRole("button", { name: "Thread details: 10 of 13 on" }))
+      .element(screen.getByRole("button", { name: "Thread details: 10 of 14 on" }))
       .toBeVisible();
 
     await userEvent.keyboard("{Escape}");
@@ -238,7 +238,7 @@ describe("Artifacts in Show in thread details", () => {
 
     expect(getClientSettings().threadDetailsItems).toEqual({});
     await expect
-      .element(screen.getByRole("button", { name: "Thread details: 11 of 13 on" }))
+      .element(screen.getByRole("button", { name: "Thread details: 11 of 14 on" }))
       .toBeVisible();
   });
 
@@ -247,7 +247,7 @@ describe("Artifacts in Show in thread details", () => {
     setLocalStorageItem(FORK_ARTIFACTS_ENABLED_KEY, false, ForkArtifactsEnabled);
     await using screen = await render(<ThreadDetailsItemsRow />);
 
-    const trigger = screen.getByRole("button", { name: "Thread details: 10 of 12 on" });
+    const trigger = screen.getByRole("button", { name: "Thread details: 10 of 13 on" });
     await expect.element(trigger).toBeVisible();
     await expect
       .element(screen.getByRole("button", { name: "Reset thread details to default" }))
@@ -274,7 +274,7 @@ describe("Artifacts in Show in thread details", () => {
     const artifactsRow = page.getByRole("button", { name: /Artifacts\s*1/ });
     await expect.element(artifactsRow).toBeVisible();
 
-    await userEvent.click(page.getByRole("button", { name: "Thread details: 11 of 13 on" }));
+    await userEvent.click(page.getByRole("button", { name: "Thread details: 11 of 14 on" }));
     await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Artifacts" }));
 
     await expect.element(artifactsRow).not.toBeInTheDocument();

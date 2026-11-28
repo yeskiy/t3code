@@ -387,6 +387,7 @@ it("offers Open in T3 or Open externally on MarkdownFileLink based on Open files
       "fork-open-in-t3",
       "open",
       "reveal",
+      "download",
       "copy-relative",
       "copy-full",
     ]);
@@ -409,6 +410,7 @@ it("offers Open in T3 or Open externally on MarkdownFileLink based on Open files
       "fork-open-external",
       "open",
       "reveal",
+      "download",
       "copy-relative",
       "copy-full",
     ]);
