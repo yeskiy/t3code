@@ -261,6 +261,7 @@ import * as ServerActivation from "./serverActivation.ts";
 // fork: one-time backfill of conversation-only checkpoints for failed runs.
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { backfillFailedRunCheckpointsOnStartup } from "./fork/rewind/failedRunCheckpointBackfill.ts";
+import * as ForkAgentSessionImport from "./fork/agentSessionImport/ForkAgentSessionImport.ts"; // fork: agent session import tools
 
 // Escaped MCP handoff provenance can exceed find-my-way's 100-character segment default.
 const HTTP_ROUTER_CONFIG = {
@@ -940,6 +941,7 @@ const layerMakeRoutes = Layer.mergeAll(
     speechStreamRouteLayer,
   ),
   McpHttpServer.layer.pipe(
+    Layer.provide(ForkAgentSessionImport.layer), // fork: agent session import tools
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
     Layer.provide(ProjectionStoreV2.layer),
