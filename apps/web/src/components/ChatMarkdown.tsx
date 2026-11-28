@@ -14,6 +14,7 @@ import {
   inlineCodeFilePathCandidate,
   parseMarkdownSandboxFileLink,
 } from "@t3tools/shared/markdownLinks";
+import { maskMarkdownFrontmatter } from "@t3tools/shared/markdownFrontmatter";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskEdits";
 import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
@@ -29,6 +30,8 @@ import {
   encodeComposerContextClipboardHtml,
 } from "@t3tools/shared/composerContextClipboard";
 import {
+  Code2Icon,
+  EyeIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
   GlobeIcon,
@@ -106,6 +109,7 @@ import {
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { markdownImageGallery } from "./chat/markdownImageGallery";
 import { type MediaActionSource } from "./media/MediaActions";
+import { useFileDownload } from "./files/useFileDownload";
 import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
 import {
   revealInFileExplorerLabelForKind,
@@ -184,6 +188,7 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { textDirection } from "~/textDirection";
 import { useOpenLink } from "../browser/useOpenLink";
+import { loopbackWebPort, useOpenInSystemBrowser } from "../browser/useOpenInSystemBrowser";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
@@ -248,6 +253,7 @@ const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
 
 interface ChatMarkdownProps {
   renderInsights?: boolean;
+  previewMarkdownFences?: boolean;
   /** Compact markdown transforms remove blocks before rendering inside a label. */
   inline?: boolean;
   text: string;
@@ -595,6 +601,7 @@ function useChatMarkdownState(
     environmentId: explicitEnvironmentId,
     onTaskListChange,
     isStreaming = false,
+    previewMarkdownFences = false,
     skills = EMPTY_MARKDOWN_SKILLS,
     onUseArtifactTemplate,
     onRunShellCommand,
@@ -664,6 +671,7 @@ function useChatMarkdownState(
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const isClientHost = useAtomValue(clientHostEnvironmentAtom(environmentId));
   const remoteOpen = useRemoteOpenResolution(environmentId);
+  const downloadFile = useFileDownload(environmentId);
   const canUseShellActions =
     canOperateHost &&
     canUseMarkdownFileShellActions(environmentId, remoteOpen.state.mode, remoteOpen.isResolved);
@@ -799,6 +807,18 @@ function useChatMarkdownState(
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
   const openIssueLink = useOpenIssueLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
+  const openInSystemBrowser = useOpenInSystemBrowser(environmentId);
+  const openExternalLink = (href: string) =>
+    openInSystemBrowser(href).catch((cause: unknown) => {
+      reportMarkdownActionFailure({ operation: "open-link-external", target: href }, cause);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: gt("Unable to open in browser"),
+          description: thrownErrorMessage(cause, m) ?? gt("An error occurred."),
+        }),
+      );
+    });
   // Subscribe so hydrated settings apply before the anchor synchronously decides whether to intercept _blank.
   // fork: use fork "Open links in" preference (defaults to system browser).
   const [linkTargetPreference] = useForkOpenLinksIn();
@@ -1130,6 +1150,15 @@ function useChatMarkdownState(
             : undefined
         }
         revealLabel={revealInFileManagerLabel}
+        onDownload={
+          downloadFile && cwd && !isAppBundle
+            ? () =>
+                downloadFile(
+                  cwd,
+                  resolveHostPath().then(({ absolutePath }) => absolutePath),
+                )
+            : undefined
+        }
         onOpenInBrowser={
           threadRef &&
           canOperatePreview &&
@@ -1143,6 +1172,7 @@ function useChatMarkdownState(
   };
 
   const componentState = {
+    agentDirectories,
     canOperateHost,
     canOperatePreview,
     cwd,
@@ -1160,6 +1190,7 @@ function useChatMarkdownState(
     inline,
     mathEnabled,
     isStreaming,
+    previewMarkdownFences,
     linkTargetPreference,
     markdownFileLinkMetaByHref,
     onTaskListChange,
@@ -1168,6 +1199,7 @@ function useChatMarkdownState(
     openChangeRequestLink,
     openIssueLink,
     openDeferredMarkdownLink,
+    openExternalLink,
     openExternalLinkInPreview,
     openMarkdownMedia,
     projects,
@@ -1341,6 +1373,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       openIssueLink,
       openDeferredMarkdownLink,
       linkTargetPreference,
+      openExternalLink,
       openExternalLinkInPreview,
       projects,
       issueProjects,
@@ -1491,22 +1524,17 @@ const CHAT_MARKDOWN_COMPONENTS = {
               }) !== "app"
             ) {
               // Open desktop Alt-clicks before Chromium downloads them so link routers can read the held key.
-              // Editor and mailto links also go over IPC: the desktop popup handler only passes web links.
+              // Editor links also go over IPC: the desktop popup handler only passes web links.
+              // Localhost links too, on every client: the environment's loopback may be another machine's.
               // fork: route mailto links through openExternal so the OS mail app launches cleanly.
               if (
-                isElectron &&
-                (event.altKey || isLocalEditorFileHref(href) || isMailtoUrl(href))
+                (isElectron &&
+                  (event.altKey || isLocalEditorFileHref(href) || isMailtoUrl(href))) ||
+                loopbackWebPort(href) !== null
               ) {
                 event.preventDefault();
                 event.stopPropagation();
-                void readLocalApi()
-                  ?.shell.openExternal(href)
-                  .catch((cause) =>
-                    reportMarkdownActionFailure(
-                      { operation: "open-link-external", target: href },
-                      cause,
-                    ),
-                  );
+                void openExternalLink(href);
               }
               return;
             }
@@ -1519,27 +1547,22 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 result.cause,
               );
               if (isBrowserSettingsReadError(squashAtomCommandFailure(result))) return;
-              void readLocalApi()?.shell.openExternal(href);
+              void openExternalLink(href);
             });
           }}
           onAuxClick={(event) => {
             // A middle-click raises no click event, and the desktop popup handler only passes web links.
             if (
-              !isElectron ||
               event.button !== 1 ||
               !href ||
-              (!isLocalEditorFileHref(href) && !isMailtoUrl(href))
+              !(
+                (isElectron && (isLocalEditorFileHref(href) || isMailtoUrl(href))) || // fork: mailto
+                loopbackWebPort(href) !== null
+              )
             )
               return;
             event.preventDefault();
-            void readLocalApi()
-              ?.shell.openExternal(href)
-              .catch((cause) =>
-                reportMarkdownActionFailure(
-                  { operation: "open-link-external", target: href },
-                  cause,
-                ),
-              );
+            void openExternalLink(href);
           }}
           onKeyDown={(event) => {
             if (href && faviconHost) openContextMenuFromKeyboard(event);
@@ -1573,7 +1596,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                   );
                 }
               },
-              openExternal: (target) => api.shell.openExternal(target),
+              openExternal: (target) => openExternalLink(target),
               copyLink: (target) =>
                 writeTextToClipboard(target, {
                   target: "link",
@@ -1921,9 +1944,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   pre: function MarkdownPre({ node, children, ...props }) {
     const gt = useGT();
-    const { resolvedTheme, diffThemeName, expandMedia, isStreaming, onRunShellCommand } = use(
-      ChatMarkdownRendererContext,
-    );
+    const {
+      resolvedTheme,
+      diffThemeName,
+      expandMedia,
+      isStreaming,
+      onRunShellCommand,
+      previewMarkdownFences,
+    } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
     const codeBlock = extractCodeBlock(children);
     if (!codeBlock) {
@@ -1971,6 +1999,18 @@ const CHAT_MARKDOWN_COMPONENTS = {
         </MarkdownMermaidCodeBlock>
       );
     }
+    if (previewMarkdownFences && /^(?:markdown|md)$/i.test(language)) {
+      return (
+        <PreviewableMarkdownFence
+          code={codeBlock.code}
+          language={language}
+          fenceTitle={fenceTitle}
+          isStreaming={isStreaming}
+        >
+          {highlightedCode}
+        </PreviewableMarkdownFence>
+      );
+    }
     return (
       <MarkdownCodeBlock
         code={codeBlock.code}
@@ -1989,6 +2029,72 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
 } satisfies MarkdownComponents;
+
+function PreviewableMarkdownFence({
+  code,
+  language,
+  fenceTitle,
+  isStreaming,
+  children,
+}: {
+  code: string;
+  language: string;
+  fenceTitle: string | null;
+  isStreaming: boolean;
+  children: ReactNode;
+}) {
+  const gt = useGT();
+  const [showPreview, setShowPreview] = useState(false);
+  const rendered = showPreview && !isStreaming;
+  const { agentDirectories, cwd, expandMedia, headingLevelOffset, resolvedTheme, threadRef } = use(
+    ChatMarkdownRendererContext,
+  );
+  const label = rendered ? gt("Show markdown source") : gt("Show rendered markdown");
+
+  return (
+    <MarkdownCodeBlock
+      code={code}
+      language={language}
+      fenceTitle={fenceTitle}
+      theme={resolvedTheme}
+      isStreaming={isStreaming}
+      canWrap={!rendered}
+      viewToggle={
+        isStreaming ? null : (
+          <SharedTooltipTrigger
+            label={label}
+            render={
+              <Button
+                type="button"
+                variant="ghost-muted"
+                size="icon-xs"
+                onClick={() => setShowPreview(!showPreview)}
+                aria-label={label}
+                aria-pressed={rendered}
+              />
+            }
+          >
+            {rendered ? <Code2Icon className="size-3" /> : <EyeIcon className="size-3" />}
+          </SharedTooltipTrigger>
+        )
+      }
+    >
+      {rendered ? (
+        <ChatMarkdown
+          text={maskMarkdownFrontmatter(code)}
+          cwd={cwd}
+          agentDirectories={agentDirectories}
+          threadRef={threadRef}
+          headingLevelOffset={headingLevelOffset}
+          onImageExpand={expandMedia}
+          className="mt-1 border-t border-border/70 bg-background px-3 py-3"
+        />
+      ) : (
+        children
+      )}
+    </MarkdownCodeBlock>
+  );
+}
 
 const markdownOptions = new WeakMap<MarkdownExtensions, Map<string, WordsHastOptions>>();
 

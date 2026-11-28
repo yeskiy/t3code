@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -76,7 +77,12 @@ const appThread = (id: ThreadId): OrchestrationV2AppThread => ({
 });
 
 const sinkLayer = EventSink.layer.pipe(
-  Layer.provideMerge(Layer.merge(EventStore.layer, ProjectionStore.layer)),
+  Layer.provideMerge(
+    Layer.merge(
+      EventStore.layer,
+      ProjectionStore.layer.pipe(Layer.provide(NodeCrypto.layerDigest)),
+    ),
+  ),
   Layer.provideMerge(SqlitePersistence.layerMemory),
 );
 

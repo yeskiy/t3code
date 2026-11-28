@@ -37,8 +37,7 @@ const testLayer = Layer.mergeAll(
   RuntimeLayer.layerEventSink,
   ProjectionStore.layer,
   IdAllocator.layer,
-  NodeCrypto.layer,
-).pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
+).pipe(Layer.provideMerge(NodeCrypto.layer), Layer.provideMerge(SqlitePersistence.layerMemory));
 
 const threadId = ThreadId.make("thread:backfill-failed-runs");
 const projectId = ProjectId.make("project:backfill-failed-runs");

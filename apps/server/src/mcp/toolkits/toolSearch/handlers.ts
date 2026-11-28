@@ -10,17 +10,23 @@ import { ToolSearchToolkit } from "./tools.ts";
 export const layer = McpToolAccess.toLayer(ToolSearchToolkit, {
   tool_search: McpToolAccess.readsAsCaller(({ query }) =>
     Effect.gen(function* () {
-      const { thread } = yield* McpInvocationContext.McpInvocationContext.pipe(
-        Effect.flatMap((scope) => McpInvocationContext.requireThreadScope(scope, "tool_search")),
+      const scope = yield* McpInvocationContext.McpInvocationContext.pipe(
+        Effect.flatMap((current) =>
+          McpInvocationContext.requireThreadScope(current, "tool_search"),
+        ),
       );
       const exposure = yield* McpToolExposure.McpToolExposure;
       // fork: filter out tools disabled by the provider's MCP scope
-      const forkScope = yield* readOptionalForkMcpScopeForProvider(thread.providerInstanceId);
-      const allow =
-        forkScope === undefined
-          ? undefined
-          : (toolName: string) => isForkMcpToolAllowed(forkScope, toolName);
-      return { tools: yield* exposure.search(thread.providerSessionId, query, allow) };
+      const forkScope = yield* readOptionalForkMcpScopeForProvider(scope.thread.providerInstanceId);
+      return {
+        tools: yield* exposure.search(scope.thread.providerSessionId, query, {
+          mode: scope.toolExposure,
+          allow:
+            forkScope === undefined
+              ? undefined
+              : (toolName: string) => isForkMcpToolAllowed(forkScope, toolName),
+        }),
+      };
     }),
   ),
 });
