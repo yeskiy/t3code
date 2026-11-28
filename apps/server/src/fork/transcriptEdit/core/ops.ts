@@ -64,6 +64,7 @@ const editText = (
 ) => {
   const e = need(t, uuid);
   if (e.type !== type) fail(`The entry is not a ${type} entry.`);
+  if (buildUnits(t).some((u) => u.locked && u.main.includes(uuid))) fail("The unit is locked.");
   if (block === null) {
     return typeof e.message?.content === "string"
       ? replaceEntry(t, uuid, withContent(e, text))

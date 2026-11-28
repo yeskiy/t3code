@@ -47,12 +47,17 @@ import { resolveClaudeHomePath } from "../../provider/Drivers/ClaudeHome.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { diffUnits } from "./core/diff.ts";
 import { parseJsonl, serializeJsonl } from "./core/jsonl.ts";
-import { activeLeaf } from "./core/model.ts";
+import { resumePoint } from "./core/model.ts";
 import { tryApply } from "./core/ops.ts";
 import type { Transcript } from "./core/types.ts";
 import { validate } from "./core/validate.ts";
 import { fullBlockText, fullRawText, unitViews } from "./core/view.ts";
-import { lastCompactionItemId, mapUnitsToItems } from "./itemMap.ts";
+import {
+  earlierSessionItemId,
+  isRealCursor,
+  lastCompactionItemId,
+  mapUnitsToItems,
+} from "./itemMap.ts";
 import { type MirrorPlan, planMirror, remapCursor, remirror } from "./projectionMirror.ts";
 import {
   BACKUPS_KEPT,
@@ -133,9 +138,6 @@ const editError = (code: ForkTranscriptEditError["code"], detail: string) =>
 
 const isWorking = (runs: ReadonlyArray<OrchestrationV2Run>): boolean =>
   runs.some((run) => WORKING_STATUSES.has(run.status));
-
-const isRealCursor = (nativeId: string | null | undefined): nativeId is string =>
-  typeof nativeId === "string" && !nativeId.startsWith("turn:");
 
 const itemLinks = (
   transcript: Transcript,
@@ -336,7 +338,7 @@ const make = Effect.gen(function* () {
     const providerThread = input.records.providerThreads.find(
       (candidate) => candidate.id === input.providerThreadId,
     );
-    const leaf = activeLeaf(input.edited);
+    const head = resumePoint(input.edited);
     const messages = yield* Effect.forEach(input.plan.messages, (message) =>
       Effect.map(nextId(), (id): OrchestrationV2DomainEvent => ({
         id,
@@ -358,8 +360,8 @@ const make = Effect.gen(function* () {
         payload: item,
       })),
     );
-    const head =
-      providerThread === undefined || leaf === null
+    const headEvents =
+      providerThread === undefined
         ? []
         : [
             yield* Effect.map(nextId(), (id): OrchestrationV2DomainEvent => ({
@@ -371,11 +373,10 @@ const make = Effect.gen(function* () {
               occurredAt: now,
               payload: {
                 ...providerThread,
-                nativeConversationHeadRef: {
-                  driver: providerThread.driver,
-                  nativeId: leaf,
-                  strength: "weak",
-                },
+                nativeConversationHeadRef:
+                  head === null
+                    ? null
+                    : { driver: providerThread.driver, nativeId: head, strength: "weak" },
                 updatedAt: now,
               },
             })),
@@ -406,7 +407,7 @@ const make = Effect.gen(function* () {
         payload: turn,
       })),
     );
-    return [...messages, ...items, ...head, ...turns];
+    return [...messages, ...items, ...headEvents, ...turns];
   });
 
   const writeLocked = Effect.fn("fork.transcriptEdit.writeLocked")(function* (input: {
@@ -576,12 +577,19 @@ const make = Effect.gen(function* () {
       const fresh = yield* readFile(target.path);
       yield* remember(input.threadId, fresh);
       const working = isWorking(target.records.runs);
+      const earlier = earlierSessionItemId({
+        transcript: fresh.base,
+        providerThread: target.providerThread,
+        providerTurns: target.records.providerTurns,
+        items: target.records.turnItems,
+      });
       return {
         sessionId: target.sessionId,
         baseKey: fresh.key,
         units: unitViews(fresh.base, TOOL_TEXT_LIMIT),
         links: itemLinks(fresh.base, target.records.turnItems, input.threadId),
         compactionItemId: lastCompactionItemId(fresh.base, target.records.turnItems),
+        ...(earlier === undefined ? {} : { earlierSessionItemId: earlier }),
         validation: validate(fresh.base, fresh.base),
         live: { editable: true, reason: working ? "working" : null, working },
       };

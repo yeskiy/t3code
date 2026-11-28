@@ -16,7 +16,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as TurnItemPositionStore from "../../orchestration-v2/TurnItemPositionStore.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
-import { FIXTURE_TEXT } from "./core/fixtures.ts";
+import { FIXTURE_TEXT, handoffFixtureText } from "./core/fixtures.ts";
 import { parseJsonl } from "./core/jsonl.ts";
 import { applyOp, applyOps } from "./core/ops.ts";
 import { planMirror, remapCursor, remirror } from "./projectionMirror.ts";
@@ -783,6 +783,12 @@ describe("projectionMirror", () => {
     });
     expect(remapCursor({ edited: withoutAllBeforeU2, base, cursor: "a3" })).toBeNull();
     expect(remapCursor({ edited: withoutA3, base, cursor: "unknown-uuid" })).toBeNull();
+  });
+
+  it("remaps a deleted cursor past attachments to the nearest user or assistant message", () => {
+    const base = parseJsonl(handoffFixtureText("I stopped it."));
+    const edited = applyOp(base, { kind: "deleteUnits", units: ["n1", "m1", "i1"] });
+    expect(remapCursor({ edited, base, cursor: "i1" })).toBe("h1");
   });
 
   it.effect(

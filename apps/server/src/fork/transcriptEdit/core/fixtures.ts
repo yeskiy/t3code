@@ -136,3 +136,64 @@ const COMPACTED_FIXTURE_LINES = [
 ];
 
 export const COMPACTED_FIXTURE_TEXT = `${COMPACTED_FIXTURE_LINES.map((l) => JSON.stringify(l)).join("\n")}\n`;
+
+const attachmentLine = (uuid: string, parentUuid: string | null, n: number, type: string) => ({
+  ...base,
+  type: "attachment",
+  uuid,
+  parentUuid,
+  timestamp: at(n),
+  attachment: { type },
+});
+
+const HANDOFF_TEXT =
+  "Context handoff (delta_since_target_last_seen):\nProvider context handoff. Thread: thread-1. Covered app runs: 1-3.\n\nUser message:\nI stopped it.";
+
+// A session that T3 started after a failed resume: hook attachments, the handoff prompt, a refusal.
+const handoffFixtureLines = (firstPrompt: string) => [
+  attachmentLine("h0", null, 20, "hook_success"),
+  attachmentLine("h0b", "h0", 21, "hook_additional_context"),
+  {
+    ...base,
+    type: "user",
+    uuid: "h1",
+    parentUuid: "h0b",
+    timestamp: at(22),
+    message: { role: "user", content: firstPrompt },
+  },
+  attachmentLine("h1e", "h1", 23, "environment"),
+  attachmentLine("h1p", "h1e", 24, "prompt_snapshot"),
+  { type: "last-prompt", leafUuid: "h1p", lastPrompt: "I stopped it.", sessionId: "s-1" },
+  {
+    ...base,
+    type: "system",
+    subtype: "informational",
+    uuid: "n1",
+    parentUuid: "h1p",
+    timestamp: at(25),
+    content: "The safeguards stopped the response above.",
+  },
+  {
+    ...base,
+    type: "user",
+    uuid: "m1",
+    parentUuid: "n1",
+    isMeta: true,
+    timestamp: at(26),
+    message: { role: "user", content: "Your response above was stopped." },
+  },
+  {
+    ...base,
+    type: "user",
+    uuid: "i1",
+    parentUuid: "m1",
+    timestamp: at(27),
+    message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+  },
+  { type: "last-prompt", leafUuid: "i1", lastPrompt: "I stopped it.", sessionId: "s-1" },
+];
+
+export const handoffFixtureText = (firstPrompt = HANDOFF_TEXT) =>
+  `${handoffFixtureLines(firstPrompt)
+    .map((l) => JSON.stringify(l))
+    .join("\n")}\n`;

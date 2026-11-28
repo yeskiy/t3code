@@ -3,13 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { editBlock } from "./editAvailability.logic";
 
-const unit = (locked: boolean): ForkTranscriptUnitView => ({
+const unit = (locked: boolean, handoff = false): ForkTranscriptUnitView => ({
   key: "a1",
   kind: "assistant",
   subtype: null,
   locked,
   meta: false,
   compactSummary: false,
+  ...(handoff ? { handoff: true as const } : {}),
   time: null,
   blocks: [],
   entries: [],
@@ -23,7 +24,7 @@ const base = {
   unitKey: "a1",
   unit: unit(false),
   loaded: true,
-  beforeCompaction: false,
+  cut: null,
 } as const;
 
 describe("editBlock", () => {
@@ -52,18 +53,28 @@ describe("editBlock", () => {
   });
 
   it("gives before-compaction for an unlinked item before the last compaction", () => {
-    const before = { ...base, unitKey: null, unit: undefined, beforeCompaction: true };
+    const before = { ...base, unitKey: null, unit: undefined, cut: "before-compaction" as const };
     expect(editBlock(before)).toBe("before-compaction");
     expect(editBlock({ ...before, loaded: false })).toBe("before-compaction");
   });
 
   it("lets a linked unit win over the compaction mark", () => {
-    expect(editBlock({ ...base, beforeCompaction: true })).toBeNull();
-    expect(editBlock({ ...base, unit: unit(true), beforeCompaction: true })).toBe("locked");
+    expect(editBlock({ ...base, cut: "before-compaction" })).toBeNull();
+    expect(editBlock({ ...base, unit: unit(true), cut: "earlier-session" })).toBe("locked");
   });
 
   it("gives not-claude before before-compaction", () => {
-    expect(editBlock({ ...base, driver: "codex", beforeCompaction: true })).toBe("not-claude");
+    expect(editBlock({ ...base, driver: "codex", cut: "before-compaction" })).toBe("not-claude");
+  });
+
+  it("gives earlier-session for an unlinked item of an earlier Claude session", () => {
+    const earlier = { ...base, unitKey: null, unit: undefined, cut: "earlier-session" as const };
+    expect(editBlock(earlier)).toBe("earlier-session");
+    expect(editBlock({ ...earlier, loaded: false })).toBe("earlier-session");
+  });
+
+  it("gives handoff for the locked recovery handoff prompt", () => {
+    expect(editBlock({ ...base, unit: unit(true, true) })).toBe("handoff");
   });
 
   it("gives null for an unknown driver, so the load decides", () => {

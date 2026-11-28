@@ -1,5 +1,13 @@
-import type { OrchestrationV2TurnItem, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ProviderThread,
+  OrchestrationV2ProviderTurn,
+  OrchestrationV2TurnItem,
+  RunId,
+  ThreadId,
+  TurnItemId,
+} from "@t3tools/contracts";
 
+import { claudeSessionOfTurn } from "../rewind/claudeSessionHistory.ts";
 import { activePath, blocks, buildUnits, byUuid, entries, type Unit } from "./core/model.ts";
 import type { Entry, Transcript } from "./core/types.ts";
 
@@ -468,4 +476,37 @@ export const lastCompactionItemId = (
         item.forkTranscriptHidden !== true,
     )?.id ?? null
   );
+};
+
+// A provider turn cursor that names a Claude message, not a T3 placeholder.
+export const isRealCursor = (nativeId: string | null | undefined): nativeId is string =>
+  typeof nativeId === "string" && !nativeId.startsWith("turn:");
+
+// The last visible item of the turns that an earlier Claude session holds. The session list decides,
+// else a turn whose cursor the loaded file lacks marks the earlier sessions.
+export const earlierSessionItemId = (input: {
+  readonly transcript: Transcript;
+  readonly providerThread: OrchestrationV2ProviderThread;
+  readonly providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;
+  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+}): string | undefined => {
+  const current = input.providerThread.nativeThreadRef?.nativeId ?? null;
+  const known = byUuid(input.transcript);
+  const recorded = input.providerThread.nativeMetadata?.forkClaudeSessions !== undefined;
+  const turns = input.providerTurns.filter(
+    (turn) => turn.providerThreadId === input.providerThread.id,
+  );
+  const earlier = turns.filter((turn) =>
+    recorded
+      ? claudeSessionOfTurn(input.providerThread, turn.ordinal) !== current
+      : isRealCursor(turn.nativeTurnRef?.nativeId) && !known.has(turn.nativeTurnRef.nativeId),
+  );
+  const last = Math.max(0, ...earlier.map((turn) => turn.ordinal));
+  const ids = new Set(turns.filter((turn) => turn.ordinal <= last).map((turn) => turn.id));
+  return sortItems(input.items).findLast(
+    (item) =>
+      item.providerTurnId !== null &&
+      ids.has(item.providerTurnId) &&
+      item.forkTranscriptHidden !== true,
+  )?.id;
 };

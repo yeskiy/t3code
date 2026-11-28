@@ -11,8 +11,19 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 import { environmentThreadDetails } from "~/state/threads";
 import { useV2ItemSupport } from "~/state/v2ItemSupport";
-import { compactionCutoff } from "./compaction.logic";
-import { editBlock, type EditBlock } from "./editAvailability.logic";
+import {
+  compactionCutoff,
+  earlierSessionCut,
+  earlierSessionTurnIds,
+  rowCut,
+  type RowCut,
+} from "./compaction.logic";
+import {
+  editBlock,
+  type EditBlock,
+  HANDOFF_TOOLTIP,
+  LOCKED_TOOLTIP,
+} from "./editAvailability.logic";
 import {
   forkTranscriptEditSessionAtom,
   type ForkTranscriptEditSession,
@@ -31,8 +42,18 @@ const BLOCK_TOOLTIP: Record<Exclude<EditBlock, null | "setting-off">, string> = 
     "This entry is not in the session file that was loaded. Save or discard the changes, then try again.",
   "before-compaction":
     "Claude sees only the compaction summary for this part, so these messages cannot be edited.",
-  locked: "This entry is locked. The session needs it.",
+  "earlier-session":
+    "This message is in an earlier Claude session. Only the current session file can be edited.",
+  locked: LOCKED_TOOLTIP,
+  handoff: HANDOFF_TOOLTIP,
 };
+
+const CUT_LABEL: Record<Exclude<RowCut, null>, string> = {
+  "before-compaction": "Before compaction",
+  "earlier-session": "Earlier session",
+};
+
+const NO_TURNS: ReadonlySet<string> = new Set();
 
 const ASSISTANT_META_PREFIX = "assistant-meta:";
 
@@ -54,6 +75,9 @@ const unitKeyFor = (session: ForkTranscriptEditSession, itemId: string): string 
 const loadedCompactionId = (session: ForkTranscriptEditSession): string | null | undefined =>
   session.load === null ? undefined : session.load.compactionItemId;
 
+const loadedEarlierSessionId = (session: ForkTranscriptEditSession): string | null | undefined =>
+  session.load === null ? undefined : (session.load.earlierSessionItemId ?? null);
+
 function EditRowButton(props: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly rowId: string;
@@ -71,8 +95,9 @@ function EditRowButton(props: {
     sourceThreadId: props.projectedItem.sourceThreadId,
     sourceItemId: props.projectedItem.sourceItemId,
   });
+  const threadAtom = environmentThreadDetails.threadAtom(props.threadRef);
   const threadDriver = useAtomValue(
-    environmentThreadDetails.threadAtom(props.threadRef),
+    threadAtom,
     (thread) =>
       thread?.projection.providerThreads.find(
         (candidate) => candidate.id === thread.projection.thread.activeProviderThreadId,
@@ -82,8 +107,22 @@ function EditRowButton(props: {
   const quietRowsAtom = environmentThreadDetails.quietVisibleTurnItemsAtom(props.threadRef);
   const sessionAtom = forkTranscriptEditSessionAtom(props.threadKey);
   const compactionId = useAtomValue(sessionAtom, loadedCompactionId);
-  const cutoff = useAtomValue(quietRowsAtom, (rows) => compactionCutoff(rows, compactionId));
-  const blockOf = (session: ForkTranscriptEditSession, cut: number | null): EditBlock => {
+  const earlierId = useAtomValue(sessionAtom, loadedEarlierSessionId);
+  const turnIds = useAtomValue(threadAtom, (thread) =>
+    thread == null ? NO_TURNS : earlierSessionTurnIds(thread.projection),
+  );
+  const cutOf = (
+    rows: Parameters<typeof compactionCutoff>[0],
+    compaction: string | null | undefined,
+    earlier: string | null | undefined,
+    turns: ReadonlySet<string>,
+  ): RowCut =>
+    rowCut(props.projectedItem.position, {
+      compaction: compactionCutoff(rows, compaction),
+      earlierSession: earlierSessionCut(rows, turns, earlier),
+    });
+  const cut = useAtomValue(quietRowsAtom, (rows) => cutOf(rows, compactionId, earlierId, turnIds));
+  const blockOf = (session: ForkTranscriptEditSession, rowCutValue: RowCut): EditBlock => {
     const unitKey = unitKeyFor(session, itemId);
     const notClaude =
       session.error?.code === "not-claude" || session.load?.live.reason === "not-claude";
@@ -93,10 +132,10 @@ function EditRowButton(props: {
       unitKey,
       unit: session.load?.units.find((unit) => unit.key === unitKey),
       loaded: session.load !== null,
-      beforeCompaction: cut !== null && props.projectedItem.position < cut,
+      cut: rowCutValue,
     });
   };
-  const block = useAtomValue(sessionAtom, (session) => blockOf(session, cutoff));
+  const block = useAtomValue(sessionAtom, (session) => blockOf(session, cut));
 
   const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -111,9 +150,15 @@ function EditRowButton(props: {
       return;
     }
     const unitKey = unitKeyFor(session, itemId);
+    const thread = registry.get(threadAtom);
     const reason = blockOf(
       session,
-      compactionCutoff(registry.get(quietRowsAtom), loadedCompactionId(session)),
+      cutOf(
+        registry.get(quietRowsAtom),
+        loadedCompactionId(session),
+        loadedEarlierSessionId(session),
+        thread == null ? NO_TURNS : earlierSessionTurnIds(thread.projection),
+      ),
     );
     if (reason !== null || unitKey === null) {
       toastManager.add({
@@ -134,7 +179,7 @@ function EditRowButton(props: {
     actions.openUnit(unitKey, formRowId(props.rowId));
   };
 
-  if (block === "before-compaction") {
+  if (block === "before-compaction" || block === "earlier-session") {
     return (
       <Tooltip>
         <TooltipTrigger
@@ -144,13 +189,13 @@ function EditRowButton(props: {
                 "flex h-6 shrink-0 cursor-default items-center px-1 text-2xs text-muted-foreground/70 select-none",
                 props.reveal === "work" && WORK_REVEAL_CLASS_NAME,
               )}
-              data-fork-transcript-before-compaction=""
+              data-fork-transcript-cut={block}
             />
           }
         >
-          Before compaction
+          {CUT_LABEL[block]}
         </TooltipTrigger>
-        <TooltipPopup side="top">{BLOCK_TOOLTIP["before-compaction"]}</TooltipPopup>
+        <TooltipPopup side="top">{BLOCK_TOOLTIP[block]}</TooltipPopup>
       </Tooltip>
     );
   }

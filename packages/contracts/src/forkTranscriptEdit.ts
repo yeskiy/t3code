@@ -115,6 +115,8 @@ export const ForkTranscriptUnitView = Schema.Struct({
   locked: Schema.Boolean,
   meta: Schema.Boolean,
   compactSummary: Schema.Boolean,
+  // The first prompt of a session that a recovery started. It holds the summary of earlier sessions.
+  handoff: Schema.optional(Schema.Literal(true)),
   time: Schema.NullOr(Schema.String),
   blocks: Schema.Array(ForkTranscriptViewBlock),
   entries: Schema.Array(ForkTranscriptEntryView),
@@ -133,6 +135,8 @@ const Issue = Schema.Struct({
     "unanswered-tool-use",
     "orphan-tool-result",
     "thinking-modified",
+    "no-conversation",
+    "leaf-not-message",
   ]),
   message: Schema.String,
   uuid: Schema.optional(Schema.String),
@@ -185,6 +189,8 @@ export const ForkTranscriptLoadResult = Schema.Struct({
   links: Schema.Array(ForkTranscriptItemLink),
   // The T3 compaction item of the last compaction on the active path. Items before it are locked.
   compactionItemId: Schema.NullOr(Schema.String),
+  // The last T3 item of an earlier Claude session. Items up to it are not in the loaded file.
+  earlierSessionItemId: Schema.optional(Schema.String),
   validation: ForkTranscriptValidation,
   live: ForkTranscriptLive,
 });

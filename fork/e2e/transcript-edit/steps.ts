@@ -478,4 +478,22 @@ export const runSteps = async (ctx: StepContext) => {
     await endSelect(page);
     await discardAll(page);
   });
+
+  await step("block a save that removes every message", async () => {
+    const before = NodeFS.readFileSync(ctx.compactFile, "utf8");
+    await startSelect(page);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Delete");
+    await until("the validation error", async () => (await validation(page)) === "1 error");
+    const saveButton = banner(page).getByRole("button", { name: "Save", exact: true });
+    equal("Save disabled", await saveButton.isDisabled(), true);
+    await banner(page).getByRole("button", { name: "1 error" }).click();
+    await until("the error text", async () =>
+      (await bodyText(page)).includes("The edit removes every user and assistant message."),
+    );
+    equal("session file", NodeFS.readFileSync(ctx.compactFile, "utf8"), before);
+    await page.keyboard.press("Escape");
+    await discardAll(page);
+    await selectBar(page).waitFor({ state: "detached" });
+  });
 };

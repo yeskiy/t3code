@@ -39,7 +39,7 @@ import { ProviderSessionManagerV2 } from "../../orchestration-v2/ProviderSession
 import * as ThreadCommandExecutor from "../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { COMPACTED_FIXTURE_TEXT, FIXTURE_TEXT } from "./core/fixtures.ts";
+import { COMPACTED_FIXTURE_TEXT, FIXTURE_TEXT, handoffFixtureText } from "./core/fixtures.ts";
 import {
   CONTINUE_TEXT,
   ForkTranscriptEdit,
@@ -754,6 +754,38 @@ describe("ForkTranscriptEdit", () => {
           { driver: CLAUDE, nativeId: "a4", strength: "weak" },
         );
         assert.equal(fake.releaseCalls.length, 1);
+      }),
+    ),
+  );
+
+  it.live("refuses the save that removes every message and leaves the file unchanged", () =>
+    runCase(({ edit, fs, dirs }) =>
+      Effect.gen(function* () {
+        const text = handoffFixtureText("I stopped it.");
+        yield* fs.writeFileString(dirs.filePath, text);
+        const { baseKey } = yield* edit.load({ threadId: THREAD_ID });
+        const refused = yield* edit
+          .save(saveInput(baseKey, [{ kind: "deleteUnits", units: ["h1", "n1", "m1", "i1"] }]))
+          .pipe(Effect.flip);
+        assert.equal(refused.code, "invalid");
+        assert.include(refused.detail, "removes every user and assistant message");
+        assert.equal(yield* fs.readFileString(dirs.filePath), text);
+      }),
+    ),
+  );
+
+  it.live("points the head at the last kept message, not at a trailing attachment", () =>
+    runCase(({ edit, fs, dirs, projections }) =>
+      Effect.gen(function* () {
+        yield* fs.writeFileString(dirs.filePath, handoffFixtureText("I stopped it."));
+        const { baseKey } = yield* edit.load({ threadId: THREAD_ID });
+        yield* edit.save(saveInput(baseKey, [{ kind: "deleteUnits", units: ["n1", "m1", "i1"] }]));
+        const after = yield* readRecords(projections);
+        assert.deepEqual(
+          after.providerThreads.find((thread) => thread.id === PROVIDER_THREAD_ID)
+            ?.nativeConversationHeadRef,
+          { driver: CLAUDE, nativeId: "h1", strength: "weak" },
+        );
       }),
     ),
   );

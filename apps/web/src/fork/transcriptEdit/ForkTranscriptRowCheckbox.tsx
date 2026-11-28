@@ -9,12 +9,12 @@ import { Checkbox } from "~/components/ui/checkbox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 import { selectableUnitKeys } from "./bulkSteps.logic";
+import { HANDOFF_TOOLTIP, LOCKED_TOOLTIP } from "./editAvailability.logic";
 import { forkTranscriptEditSessionAtom, useForkTranscriptEditActions } from "./editSession";
 import { forkTranscriptDropTargetAtom, ForkTranscriptSelectCtx } from "./ForkTranscriptSelectDnd";
 import { pendingUnits } from "./pendingUnits.logic";
 import { rangeSelectKeys, toggleKeys } from "./selection.logic";
 
-const LOCKED_TOOLTIP = "This entry is locked. The session needs it.";
 const INTERACTIVE =
   "a,button,input,textarea,select,summary,label,[role=button],[role=link],[role=checkbox],[contenteditable=true]";
 
@@ -50,6 +50,11 @@ export function ForkTranscriptSelectable(props: {
     data: { keys: props.unitKeys },
     disabled: !props.active || props.unitKeys.length === 0,
   });
+  const handoff = useAtomValue(forkTranscriptEditSessionAtom(ctx.routeThreadKey), (session) =>
+    props.unitKeys.some(
+      (key) => session.load?.units.find((unit) => unit.key === key)?.handoff === true,
+    ),
+  );
   const dropSide = useAtomValue(forkTranscriptDropTargetAtom, (target) =>
     target?.itemId === props.itemId ? target.side : null,
   );
@@ -139,7 +144,7 @@ export function ForkTranscriptSelectable(props: {
               <TooltipTrigger render={<span className="flex" />}>
                 <Checkbox aria-label="Locked entry" checked={false} disabled />
               </TooltipTrigger>
-              <TooltipPopup side="top">{LOCKED_TOOLTIP}</TooltipPopup>
+              <TooltipPopup side="top">{handoff ? HANDOFF_TOOLTIP : LOCKED_TOOLTIP}</TooltipPopup>
             </Tooltip>
           ) : null}
         </div>

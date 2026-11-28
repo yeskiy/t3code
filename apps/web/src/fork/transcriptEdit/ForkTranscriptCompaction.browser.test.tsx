@@ -43,6 +43,10 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const CREATED_AT = "2026-11-25T10:02:00.000Z";
 const BEFORE_TOOLTIP =
   "Claude sees only the compaction summary for this part, so these messages cannot be edited.";
+const EARLIER_TOOLTIP =
+  "This message is in an earlier Claude session. Only the current session file can be edited.";
+const HANDOFF_TOOLTIP =
+  "This message holds the summary of the earlier Claude sessions that T3 sent after a recovery. It is locked, because Claude needs it.";
 
 type TimelineProps = ComponentProps<typeof MessagesTimeline>;
 type Entry = TimelineProps["timelineEntries"][number];
@@ -61,7 +65,10 @@ const unit = (key: string, kind: ForkTranscriptUnitView["kind"]): ForkTranscript
   excerpt: key,
 });
 
-const loadResult = (compactionItemId: string | null): ForkTranscriptLoadResult => ({
+const loadResult = (
+  compactionItemId: string | null,
+  extra: Partial<ForkTranscriptLoadResult> = {},
+): ForkTranscriptLoadResult => ({
   sessionId: "session-1",
   baseKey: "key-1",
   units: [unit("u1", "user"), unit("a1", "assistant")],
@@ -72,6 +79,7 @@ const loadResult = (compactionItemId: string | null): ForkTranscriptLoadResult =
   compactionItemId,
   validation: { errors: [], warnings: [] },
   live: { editable: true, reason: null, working: false },
+  ...extra,
 });
 
 const sourceThread = { id: "thread-1" };
@@ -129,15 +137,22 @@ const makeEntries = (): ReadonlyArray<Entry> =>
     projectedItem: itemOf(message),
   }));
 
-const quietRows = () => [
-  ...MESSAGES.map(itemOf),
-  v2Item("compaction", "item-c1", 1, { driver: "claudeAgent" }),
+type ThreadShape = { readonly compaction: boolean; readonly spans: boolean };
+
+// Without a compaction, u0 belongs to provider turn 1, which a replaced session holds.
+const quietRows = (shape: ThreadShape) => [
+  ...MESSAGES.map((message) =>
+    message.key === "u0" && !shape.compaction
+      ? v2Item("user_message", "item-u0", 0, { providerTurnId: "provider-turn-1" })
+      : itemOf(message),
+  ),
+  ...(shape.compaction ? [v2Item("compaction", "item-c1", 1, { driver: "claudeAgent" })] : []),
 ];
 
 // Item support atoms are cached per source thread, so each test uses a fresh one.
-const mockThread = () => {
+const mockThread = (shape: ThreadShape = { compaction: true, spans: false }) => {
   sourceThread.id = `thread-${Math.random().toString(36).slice(2)}`;
-  const rows = quietRows();
+  const rows = quietRows(shape);
   const quiet = vi
     .spyOn(environmentThreadDetails, "quietVisibleTurnItemsAtom")
     .mockReturnValue(Atom.make(rows) as never);
@@ -153,9 +168,23 @@ const mockThread = () => {
         subagents: [],
         providerSessions: [],
         providerThreads: [
-          { id: "provider-thread-1", driver: "claudeAgent", providerSessionId: null },
+          {
+            id: "provider-thread-1",
+            driver: "claudeAgent",
+            providerSessionId: null,
+            nativeMetadata: shape.spans
+              ? {
+                  forkClaudeSessions: [
+                    { sessionId: "session-0", firstTurnOrdinal: 1, lastTurnOrdinal: 1 },
+                  ],
+                }
+              : null,
+          },
         ],
-        providerTurns: [],
+        providerTurns: [
+          { id: "provider-turn-1", providerThreadId: "provider-thread-1", ordinal: 1 },
+          { id: "provider-turn-2", providerThreadId: "provider-thread-1", ordinal: 2 },
+        ],
         runtimeRequests: [],
         checkpoints: [],
         contextHandoffs: [],
@@ -220,8 +249,11 @@ const row = (container: HTMLElement, key: string) => {
 const editButtonOf = (container: HTMLElement, key: string) =>
   row(container, key).querySelector<HTMLButtonElement>('button[aria-label="Edit"]');
 
+const earlierMarkerOf = (container: HTMLElement, key: string) =>
+  row(container, key).querySelector<HTMLElement>('[data-fork-transcript-cut="earlier-session"]');
+
 const markerOf = (container: HTMLElement, key: string) =>
-  row(container, key).querySelector<HTMLElement>("[data-fork-transcript-before-compaction]");
+  row(container, key).querySelector<HTMLElement>('[data-fork-transcript-cut="before-compaction"]');
 
 const clickEdit = async (container: HTMLElement, key: string) => {
   await userEvent.hover(row(container, key));
@@ -304,5 +336,85 @@ describe("Fork transcript compaction marker", () => {
     expect(selectables().some((element) => element.textContent?.includes("Old question"))).toBe(
       false,
     );
+  });
+});
+
+describe("Fork transcript earlier-session marker", () => {
+  const EARLIER = { compaction: false, spans: true };
+  const UNRECORDED = { compaction: false, spans: false };
+
+  it("marks a row of a recorded earlier Claude session before the first load", async () => {
+    rpc.load.mockReset();
+    using _thread = mockThread(EARLIER);
+    await using screen = await renderTimeline();
+    const container = screen.container;
+    await expect.poll(() => earlierMarkerOf(container, "u0")?.textContent).toBe("Earlier session");
+    expect(editButtonOf(container, "u0")).toBeNull();
+    expect(["u1", "a1", "u2"].map((key) => editButtonOf(container, key)?.disabled)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(rpc.load).not.toHaveBeenCalled();
+    await userEvent.hover(earlierMarkerOf(container, "u0")!);
+    await expect.poll(() => document.body.textContent).toContain(EARLIER_TOOLTIP);
+  });
+
+  it("marks the row from the server item after the load and explains it in a toast", async () => {
+    rpc.load.mockReset();
+    rpc.load.mockReturnValue(loadResult(null, { earlierSessionItemId: "item-u0" }));
+    const toast = vi.spyOn(toastManager, "add");
+    using _thread = mockThread(UNRECORDED);
+    await using screen = await renderTimeline();
+    await expect.poll(() => editButtonOf(screen.container, "u0")).not.toBeNull();
+    expect(earlierMarkerOf(screen.container, "u0")).toBeNull();
+    await clickEdit(screen.container, "u0");
+    await expect.poll(() => toast.mock.calls.length).toBe(1);
+    expect(toast.mock.calls[0]?.[0]).toMatchObject({
+      type: "info",
+      title: "This entry cannot be edited",
+      description: EARLIER_TOOLTIP,
+    });
+    await expect.poll(() => earlierMarkerOf(screen.container, "u0")).not.toBeNull();
+    toast.mockRestore();
+  });
+
+  it("gives no checkbox to a row of an earlier session in Select mode", async () => {
+    rpc.load.mockReset();
+    rpc.load.mockReturnValue(loadResult(null, { earlierSessionItemId: "item-u0" }));
+    using _thread = mockThread(EARLIER);
+    await using screen = await renderTimeline();
+    await expect.poll(() => editButtonOf(screen.container, "a1")).not.toBeNull();
+    await clickEdit(screen.container, "a1");
+    await expect.poll(() => loadedSession(screen.threadKey).load).not.toBeNull();
+    const atom = forkTranscriptEditSessionAtom(screen.threadKey);
+    await act(async () =>
+      appAtomRegistry.set(atom, { ...appAtomRegistry.get(atom), selectMode: true }),
+    );
+    const selectables = () => [
+      ...screen.container.querySelectorAll<HTMLElement>("[data-fork-transcript-select-keys]"),
+    ];
+    await expect
+      .poll(() => selectables().map((element) => element.dataset.forkTranscriptSelectKeys))
+      .toEqual(["u1", "a1"]);
+    expect(earlierMarkerOf(screen.container, "u0")).not.toBeNull();
+  });
+
+  it("explains the locked recovery handoff prompt", async () => {
+    rpc.load.mockReset();
+    rpc.load.mockReturnValue(
+      loadResult(null, {
+        units: [{ ...unit("u1", "user"), locked: true, handoff: true }, unit("a1", "assistant")],
+      }),
+    );
+    const toast = vi.spyOn(toastManager, "add");
+    using _thread = mockThread(UNRECORDED);
+    await using screen = await renderTimeline();
+    await expect.poll(() => editButtonOf(screen.container, "u1")).not.toBeNull();
+    await clickEdit(screen.container, "u1");
+    await expect.poll(() => toast.mock.calls.length).toBe(1);
+    expect(toast.mock.calls[0]?.[0]).toMatchObject({ description: HANDOFF_TOOLTIP });
+    await expect.poll(() => editButtonOf(screen.container, "u1")?.disabled).toBe(true);
+    toast.mockRestore();
   });
 });

@@ -13,6 +13,7 @@ export type Unit = {
   locked: boolean;
   meta: boolean;
   compactSummary: boolean;
+  handoff: boolean;
 };
 
 // Follows next() from seed until it returns null. Stops after limit steps to survive cycles.
@@ -67,6 +68,21 @@ export const activePath = (t: Transcript): Entry[] =>
 export const blocks = (e: Entry): Block[] =>
   Array.isArray(e.message?.content) ? e.message.content : [];
 
+export const isConversation = (e: Entry | undefined): boolean =>
+  e?.type === "user" || e?.type === "assistant";
+
+// The last user or assistant entry of the active path: the message Claude resumes at.
+export const resumePoint = (t: Transcript): string | null =>
+  activePath(t).findLast(isConversation)?.uuid ?? null;
+
+// The prefix that ContextHandoffDelivery writes in front of a recovery prompt.
+const HANDOFF_PREFIX = "Context handoff (";
+
+const firstText = (e: Entry): string =>
+  typeof e.message?.content === "string"
+    ? e.message.content
+    : String(blocks(e).find((b) => b.type === "text")?.text ?? "");
+
 export const hasBlock = (e: Entry, type: string): boolean => blocks(e).some((b) => b.type === type);
 
 const isToolUse = (e: Entry) => e.type === "assistant" && hasBlock(e, "tool_use");
@@ -81,6 +97,7 @@ const newUnit = (e: Entry, kind: UnitKind, uuid: string): Unit => ({
   locked: kind === "preamble" || (e.type === "system" && e.subtype === "compact_boundary"),
   meta: e.isMeta === true,
   compactSummary: e.isCompactSummary === true,
+  handoff: false,
   side: [],
 });
 
@@ -158,7 +175,17 @@ const withSideResults = (t: Transcript, units: Unit[], path: Entry[]): Unit[] =>
   );
 };
 
+// A session that a recovery started opens with the handoff prompt, which holds the earlier sessions.
+const withHandoffLock = (units: Unit[], path: Entry[]): Unit[] => {
+  const map = new Map(path.map((e) => [e.uuid, e] as const));
+  const first = units.find((u) => u.kind === "user" && !u.meta && !u.compactSummary);
+  const entry = map.get(first?.main[0]);
+  return first === undefined || entry === undefined || !firstText(entry).startsWith(HANDOFF_PREFIX)
+    ? units
+    : units.map((u) => (u === first ? { ...u, locked: true, handoff: true } : u));
+};
+
 export const buildUnits = (t: Transcript): Unit[] => {
   const path = activePath(t);
-  return withSideResults(t, stableKeys(groupUnits(path), path), path);
+  return withHandoffLock(withSideResults(t, stableKeys(groupUnits(path), path), path), path);
 };

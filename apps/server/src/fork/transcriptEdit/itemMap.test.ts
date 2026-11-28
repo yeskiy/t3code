@@ -1,9 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   MessageId,
+  NodeId,
+  type OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
   type OrchestrationV2TurnItem,
   ProviderDriverKind,
   ProviderThreadId,
+  ProviderTurnId,
   RunId,
   ThreadId,
   TurnItemId,
@@ -12,7 +16,12 @@ import * as DateTime from "effect/DateTime";
 
 import { COMPACTED_FIXTURE_TEXT, FIXTURE_TEXT } from "./core/fixtures.ts";
 import { parseJsonl } from "./core/jsonl.ts";
-import { itemForEntryText, lastCompactionItemId, mapUnitsToItems } from "./itemMap.ts";
+import {
+  earlierSessionItemId,
+  itemForEntryText,
+  lastCompactionItemId,
+  mapUnitsToItems,
+} from "./itemMap.ts";
 
 const THREAD_ID = ThreadId.make("thread:main");
 const PARENT_THREAD_ID = ThreadId.make("thread:parent");
@@ -617,5 +626,77 @@ describe("itemMap", () => {
 
     expect(lastCompactionItemId(parseJsonl(COMPACTED_FIXTURE_TEXT), items)).toBe("item:c2");
     expect(lastCompactionItemId(parseJsonl(FIXTURE_TEXT), items)).toBeNull();
+  });
+
+  it("names the last item of an earlier Claude session", () => {
+    const claude = ProviderDriverKind.make("claudeAgent");
+    const providerThread = (
+      spans?: ReadonlyArray<{
+        sessionId: string;
+        firstTurnOrdinal: number;
+        lastTurnOrdinal: number;
+      }>,
+    ) =>
+      ({
+        id: PROVIDER_THREAD_ID,
+        driver: claude,
+        nativeThreadRef: { driver: claude, nativeId: "s-new", strength: "strong" },
+        nativeMetadata: spans === undefined ? null : { forkClaudeSessions: spans },
+      }) as unknown as OrchestrationV2ProviderThread;
+    const turn = (ordinal: number, cursor: string) =>
+      ({
+        id: ProviderTurnId.make(`provider-turn:${ordinal}`),
+        providerThreadId: PROVIDER_THREAD_ID,
+        nodeId: NodeId.make(`node:${ordinal}`),
+        runAttemptId: null,
+        nativeTurnRef: { driver: claude, nativeId: cursor, strength: "strong" },
+        ordinal,
+        status: "completed",
+        startedAt: AT,
+        completedAt: AT,
+      }) satisfies OrchestrationV2ProviderTurn;
+    const turns = [turn(1, "old-a"), turn(2, "turn:run-attempt:2"), turn(3, "a3"), turn(4, "a4")];
+    const toolItem = (id: string, ordinal: number, turnOrdinal: number, hidden = false) =>
+      ({
+        ...baseFields({ id: TurnItemId.make(id), nativeId: null, ordinal }),
+        providerTurnId: ProviderTurnId.make(`provider-turn:${turnOrdinal}`),
+        type: "command_execution",
+        input: "ls",
+        ...(hidden ? { forkTranscriptHidden: true as const } : {}),
+      }) satisfies OrchestrationV2TurnItem;
+    const items = [
+      toolItem("item:old1", 10, 1),
+      toolItem("item:old1-hidden", 11, 1, true),
+      toolItem("item:old2", 20, 2),
+      toolItem("item:new3", 30, 3),
+    ];
+    const transcript = parseJsonl(FIXTURE_TEXT);
+
+    expect(
+      earlierSessionItemId({
+        transcript,
+        providerThread: providerThread(),
+        providerTurns: turns,
+        items,
+      }),
+    ).toBe("item:old1");
+    expect(
+      earlierSessionItemId({
+        transcript,
+        providerThread: providerThread([
+          { sessionId: "s-old", firstTurnOrdinal: 1, lastTurnOrdinal: 2 },
+        ]),
+        providerTurns: turns,
+        items,
+      }),
+    ).toBe("item:old2");
+    expect(
+      earlierSessionItemId({
+        transcript,
+        providerThread: providerThread(),
+        providerTurns: turns.slice(2),
+        items,
+      }),
+    ).toBeUndefined();
   });
 });

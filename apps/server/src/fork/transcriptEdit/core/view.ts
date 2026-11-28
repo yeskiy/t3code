@@ -43,6 +43,7 @@ export type UnitView = {
   locked: boolean;
   meta: boolean;
   compactSummary: boolean;
+  handoff?: true;
   time: string | null;
   blocks: ViewBlock[];
   entries: EntryView[];
@@ -76,6 +77,7 @@ const resultText = (content: unknown): string =>
 const blockView = (
   uuid: string,
   kind: UnitKind,
+  locked: boolean,
   b: Block,
   index: number,
   toolTextLimit: number,
@@ -87,7 +89,7 @@ const blockView = (
         ...base,
         type: "text",
         text: String(b.text ?? ""),
-        editable: kind === "user" || kind === "assistant",
+        editable: !locked && (kind === "user" || kind === "assistant"),
       };
     case "thinking":
       return { ...base, type: "thinking", text: String(b.thinking ?? ""), removable: true };
@@ -143,12 +145,12 @@ const entryBlocks = (
         type: "text",
         text: content,
         truncated: false,
-        editable: true,
+        editable: !locked,
         removable: false,
       },
     ];
   }
-  return blocks(e).map((b, i) => blockView(uuid, kind, b, i, toolTextLimit));
+  return blocks(e).map((b, i) => blockView(uuid, kind, locked, b, i, toolTextLimit));
 };
 
 const entryView = (e: Entry, toolTextLimit: number): EntryView => {
@@ -200,6 +202,7 @@ const viewOf = (
     locked: u.locked,
     meta: u.meta,
     compactSummary: u.compactSummary,
+    ...(u.handoff ? { handoff: true as const } : {}),
     time: typeof first?.timestamp === "string" ? first.timestamp : null,
     blocks: bs,
     entries: unitEntries,

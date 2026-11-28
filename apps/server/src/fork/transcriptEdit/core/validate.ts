@@ -5,6 +5,7 @@ import {
   buildUnits,
   byUuid,
   entries,
+  isConversation,
   walkToRoot,
 } from "./model.ts";
 import type { Entry, Transcript } from "./types.ts";
@@ -15,7 +16,9 @@ export type IssueCode =
   | "broken-chain"
   | "unanswered-tool-use"
   | "orphan-tool-result"
-  | "thinking-modified";
+  | "thinking-modified"
+  | "no-conversation"
+  | "leaf-not-message";
 
 export type Issue = { code: IssueCode; message: string; uuid?: string };
 
@@ -124,6 +127,32 @@ const toolIssues = (t: Transcript): Issue[] => {
   });
 };
 
+// Claude resumes at the last message of the active path, so that message must be a user or assistant one.
+const conversationIssues = (t: Transcript): Issue[] => {
+  const path = activePath(t);
+  if (!path.some(isConversation)) {
+    return [
+      {
+        code: "no-conversation",
+        message:
+          "The edit removes every user and assistant message. Claude would have no conversation to resume.",
+      },
+    ];
+  }
+  const last = path.findLast(
+    (e) => e.type === "user" || e.type === "assistant" || e.type === "system",
+  );
+  return isConversation(last)
+    ? []
+    : [
+        {
+          code: "leaf-not-message",
+          message: "The conversation must end with a user or assistant message.",
+          ...(last?.uuid !== undefined ? { uuid: last.uuid } : {}),
+        },
+      ];
+};
+
 const thinkingBlocks = (t: Transcript) =>
   entries(t).flatMap((e) =>
     blocks(e)
@@ -142,8 +171,7 @@ const thinkingIssues = (original: Transcript, edited: Transcript): Issue[] => {
     }));
 };
 
-// Duplicate uuids count only when the edit added them.
-// An unanswered tool call is an error only when the edit created it.
+// Duplicate uuids, unanswered tool calls, and a non-message end count only when the edit made them.
 export const validate = (original: Transcript, edited: Transcript): Validation => {
   const before = duplicates(original);
   const dupes = [...duplicates(edited)].filter((id) => !before.has(id));
@@ -154,6 +182,9 @@ export const validate = (original: Transcript, edited: Transcript): Validation =
   );
   const tools = toolIssues(edited);
   const old = (i: Issue) => i.code === "unanswered-tool-use" && known.has(i.uuid);
+  const endedOnSystem = conversationIssues(original).some((i) => i.code === "leaf-not-message");
+  const ends = conversationIssues(edited);
+  const oldEnd = (i: Issue) => i.code === "leaf-not-message" && endedOnSystem;
   return {
     errors: [
       ...dupes.map((uuid): Issue => ({
@@ -164,7 +195,8 @@ export const validate = (original: Transcript, edited: Transcript): Validation =
       ...chainIssues(edited),
       ...tools.filter((i) => !old(i)),
       ...thinkingIssues(original, edited),
+      ...ends.filter((i) => !oldEnd(i)),
     ],
-    warnings: tools.filter(old),
+    warnings: [...tools.filter(old), ...ends.filter(oldEnd)],
   };
 };

@@ -1,10 +1,19 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import { diffUnits, unitText } from "./diff.ts";
-import { FIXTURE_LINES, FIXTURE_TEXT } from "./fixtures.ts";
+import { FIXTURE_LINES, FIXTURE_TEXT, handoffFixtureText } from "./fixtures.ts";
 import { lineText, parseJsonl, serializeJsonl } from "./jsonl.ts";
 import { conversationKey } from "./key.ts";
-import { activeLeaf, activePath, blocks, buildUnits, byUuid, entries, hasBlock } from "./model.ts";
+import {
+  activeLeaf,
+  activePath,
+  blocks,
+  buildUnits,
+  byUuid,
+  entries,
+  hasBlock,
+  resumePoint,
+} from "./model.ts";
 import { applyOp, applyOps, OpError, tryApply } from "./ops.ts";
 import { serializeCopy } from "./serialize.ts";
 import { validate } from "./validate.ts";
@@ -235,5 +244,63 @@ describe("transcript core", () => {
     expect(copied).toContain('"sessionId":"s-2"');
     expect(copied).not.toContain('"sessionId":"s-1"');
     expect(copied.split("\n")[0]).toBe(FIXTURE_TEXT.split("\n")[0]);
+  });
+});
+
+describe("conversation safety", () => {
+  const plain = () => parseJsonl(handoffFixtureText("I stopped it."));
+  const codes = (issues: ReadonlyArray<{ code: string }>) => issues.map((issue) => issue.code);
+
+  it("refuses the serein save that leaves only hook attachments", () => {
+    const t0 = plain();
+    const t = applyOps(t0, [{ kind: "deleteUnits", units: ["h1", "n1", "m1", "i1"] }]);
+    expect(activeLeaf(t)).toBe("h0b");
+    expect(codes(validate(t0, t).errors)).toEqual(["no-conversation"]);
+    expect(resumePoint(t)).toBeNull();
+  });
+
+  it("refuses an edit that ends the conversation on a system entry", () => {
+    const t0 = plain();
+    const t = applyOps(t0, [{ kind: "deleteUnits", units: ["m1", "i1"] }]);
+    expect(codes(validate(t0, t).errors)).toEqual(["leaf-not-message"]);
+  });
+
+  it("keeps a file that already ended on a system entry as a warning", () => {
+    const t0 = applyOps(plain(), [{ kind: "deleteUnits", units: ["m1", "i1"] }]);
+    const t = applyOps(t0, [{ kind: "editUserText", uuid: "h1", block: null, text: "Go on." }]);
+    expect(validate(t0, t).errors).toEqual([]);
+    expect(codes(validate(t0, t).warnings)).toEqual(["leaf-not-message"]);
+  });
+
+  it("accepts attachments after the last user message and resumes at that message", () => {
+    const t0 = plain();
+    const t = applyOps(t0, [{ kind: "deleteUnits", units: ["n1", "m1", "i1"] }]);
+    expect(activeLeaf(t)).toBe("h1p");
+    expect(validate(t0, t).errors).toEqual([]);
+    expect(resumePoint(t)).toBe("h1");
+    expect(resumePoint(t0)).toBe("i1");
+  });
+
+  it("locks the handoff prompt that starts a recovered session", () => {
+    const t0 = parseJsonl(handoffFixtureText());
+    expect(buildUnits(t0).map((u) => [u.key, u.kind, u.locked, u.handoff])).toEqual([
+      ["h0", "preamble", true, false],
+      ["h1", "user", true, true],
+      ["n1", "system", false, false],
+      ["m1", "user", false, false],
+      ["i1", "user", false, false],
+    ]);
+    const view = unitViews(t0, 2_000).find((u) => u.key === "h1");
+    expect(view?.handoff).toBe(true);
+    expect(view?.blocks.map((b) => b.editable)).toEqual([false]);
+    expect(() => applyOp(t0, { kind: "deleteUnit", unit: "h1" })).toThrow("The unit is locked.");
+    expect(() => applyOp(t0, { kind: "editUserText", uuid: "h1", block: null, text: "x" })).toThrow(
+      "The unit is locked.",
+    );
+    expect(() => applyOp(t0, { kind: "moveUnit", unit: "i1", toIndex: 1 })).toThrow(
+      "A unit cannot move in front of a locked unit.",
+    );
+    expect(buildUnits(plain()).find((u) => u.key === "h1")?.locked).toBe(false);
+    expect(unitViews(plain(), 2_000).find((u) => u.key === "h1")?.handoff).toBeUndefined();
   });
 });

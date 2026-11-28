@@ -11,7 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
-import { activePath, blocks, buildUnits, byUuid, type Unit } from "./core/model.ts";
+import { activePath, blocks, buildUnits, byUuid, isConversation, type Unit } from "./core/model.ts";
 import { applyOp, type InsertOp, type Op } from "./core/ops.ts";
 import type { Entry, Transcript } from "./core/types.ts";
 import { itemForEntryText, mapUnitsToItems, type MappedUnit } from "./itemMap.ts";
@@ -579,12 +579,14 @@ export const remapCursor = (input: {
   readonly base: Transcript;
   readonly cursor: string;
 }): string | null => {
+  const editedPath = activePath(input.edited);
+  if (editedPath.some((entry) => entry.uuid === input.cursor)) return input.cursor;
+  // Claude resumes only at a user or assistant message, so a moved cursor skips attachments.
   const editedUuids = new Set(
-    activePath(input.edited).flatMap((entry) =>
-      typeof entry.uuid === "string" ? [entry.uuid] : [],
+    editedPath.flatMap((entry) =>
+      typeof entry.uuid === "string" && isConversation(entry) ? [entry.uuid] : [],
     ),
   );
-  if (editedUuids.has(input.cursor)) return input.cursor;
 
   const baseMap = byUuid(input.base);
   const walk = (uuid: string | null | undefined, visited: ReadonlySet<string>): string | null => {
