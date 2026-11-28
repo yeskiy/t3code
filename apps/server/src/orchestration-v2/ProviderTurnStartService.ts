@@ -56,6 +56,8 @@ import type * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
+// fork: rewind across recovered Claude sessions
+import { withReplacedClaudeSession } from "../fork/rewind/claudeSessionHistory.ts";
 // fork: transcript edit
 import { forkVisibleTurnItems } from "../fork/transcriptEdit/visibleItems.ts";
 import { canForkBusySourceNatively, isActiveRun } from "./CommandPolicy.ts";
@@ -2240,7 +2242,12 @@ export const layer: Layer.Layer<
         effectiveHandoffs = withRecoveryHandoff(handoff);
         resumeFellBack = true;
         recoveryTurnItem = handoffTurnItem;
-        return replacement;
+        // fork: keep which turns the replaced Claude session holds (rewind fixes).
+        return withReplacedClaudeSession({
+          previous: providerThread,
+          replacement,
+          providerTurns: projection.providerTurns,
+        });
       });
       if (loadedProviderThread === undefined) return;
       if (!(yield* isCurrentAttemptInStatus("starting"))) {

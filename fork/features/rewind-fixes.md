@@ -45,32 +45,49 @@ When a rewind target turn has no real Claude cursor (for example, an older faile
 
 A rewind can recreate a removed worktree. Its background index swap holds `index.lock` for about 1 ms. `VcsProcess.run` retries a `restoreCheckpoint` Git command 2 times, 75 ms apart, only on `GIT_INDEX_LOCKED_DETAIL`.
 
+### Part H: Rewind across recovered Claude sessions
+
+A recovery to a fresh Claude session keeps the same provider thread row and only replaces `nativeThreadRef`. Provider turns do not record their session, so a rewind could pin a message of an older session as the resume point of the current one.
+
+- **Session list:** `nativeMetadata.forkClaudeSessions` holds each replaced session with its first and last turn ordinal. `withReplacedClaudeSession` appends the old session when the failed-resume recovery in `ProviderTurnStartService` starts a fresh session.
+- **Same-session fallback:** the Part B fallback accepts only turns of the target turn's session.
+- **Placement:** `placeClaudeRollback` keeps the current session when it holds the cursor. It moves to an older session whose transcript holds the cursor. Otherwise it moves to a fresh session id and sets `nativeMetadata.forkClaudeRecoverOnResume`.
+- **Threads without a session list:** the placement reads the session files beside the current transcript. An earlier cursor from another session is refused when the nearest later cursor sits in a different session. With no readable transcript, the rewind stays in the current session.
+- **Fail early:** `resumeThread` fails with `ProviderAdapterProtocolError` when the flag is set or when the session transcript lacks the resume point. The start path then recovers in a fresh session with a summary handoff. A manual resume whose resume point the session lacks fails with `ClaudeConversationNotFoundError` instead of resuming from the start of the history.
+- **Wake state:** `rollbackThread` clears the wake buffer and the background roster of the closed process. An error `result` that arrives while the wake buffer is empty is not buffered as a wake.
+- **Contract:** two optional fields on `OrchestrationV2ProviderThreadNativeMetadata` (`forkClaudeSessions`, `forkClaudeRecoverOnResume`), because the metadata struct drops unknown keys.
+
 ## Hook points
 
-| Upstream file                                                       | Hook                                                                                       |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `packages/provider-core/src/server/ProviderAdapter.ts`              | `forkEarlierCursorFallback` on rollback input and `forkDroppedPrompts` on thread snapshot  |
-| `packages/contracts/src/orchestrationV2.ts`                         | `forkRollbackDroppedPrompts` on `OrchestrationV2AppThread`                                 |
-| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`      | Part A `claudeTranscriptCursor`; Part B/E earlier-cursor fallback and `forkDroppedPrompts` |
-| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts` | Part A PR tests and Part B opt-in fallback test                                            |
-| `apps/server/src/orchestration-v2/CheckpointRollbackService.ts`     | Pass `forkEarlierCursorFallback: true` and project `forkRollbackDroppedPrompts`            |
-| `apps/server/src/orchestration-v2/Orchestrator.ts`                  | Clear `forkRollbackDroppedPrompts` on a new rollback request                               |
-| `apps/server/src/orchestration-v2/RunExecutionService.ts`           | Call `forkRunCapturesCheckpoint` on terminal run status                                    |
-| `apps/server/src/orchestration-v2/CheckpointCaptureService.ts`      | Call `forkRunCapturesCheckpoint` for settled runs                                          |
-| `apps/server/src/orchestration-v2/EffectWorker.ts`                  | Read `ForkRollbackFailureClientMessage` for rollback failure messages                      |
-| `apps/server/src/orchestration-v2/runtimeLayer.ts`                  | Provide `layerForkRollbackFailureClientMessage` in `layerProduction`                       |
-| `apps/server/src/server.ts`                                         | Run `backfillFailedRunCheckpointsOnStartup` once at startup                                |
-| `apps/web/src/components/chat/chatViewSend.ts`                      | Show the dropped-prompts toast after rewind completes                                      |
-| `apps/server/src/vcs/VcsProcess.ts`                                 | Part G: retry a checkpoint restore while a worktree index swap holds `index.lock`          |
+| Upstream file                                                                 | Hook                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/provider-core/src/server/ProviderAdapter.ts`                        | `forkEarlierCursorFallback` on rollback input and `forkDroppedPrompts` on thread snapshot                                                                                                             |
+| `packages/contracts/src/orchestrationV2.ts`                                   | `forkRollbackDroppedPrompts` on `OrchestrationV2AppThread`                                                                                                                                            |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                | Part A `claudeTranscriptCursor`; Part B/E earlier-cursor fallback and `forkDroppedPrompts`                                                                                                            |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`           | Part A PR tests and Part B opt-in fallback test                                                                                                                                                       |
+| `apps/server/src/orchestration-v2/CheckpointRollbackService.ts`               | Pass `forkEarlierCursorFallback: true` and project `forkRollbackDroppedPrompts`                                                                                                                       |
+| `apps/server/src/orchestration-v2/Orchestrator.ts`                            | Clear `forkRollbackDroppedPrompts` on a new rollback request                                                                                                                                          |
+| `apps/server/src/orchestration-v2/RunExecutionService.ts`                     | Call `forkRunCapturesCheckpoint` on terminal run status                                                                                                                                               |
+| `apps/server/src/orchestration-v2/CheckpointCaptureService.ts`                | Call `forkRunCapturesCheckpoint` for settled runs                                                                                                                                                     |
+| `apps/server/src/orchestration-v2/EffectWorker.ts`                            | Read `ForkRollbackFailureClientMessage` for rollback failure messages                                                                                                                                 |
+| `apps/server/src/orchestration-v2/runtimeLayer.ts`                            | Provide `layerForkRollbackFailureClientMessage` in `layerProduction`                                                                                                                                  |
+| `apps/server/src/server.ts`                                                   | Run `backfillFailedRunCheckpointsOnStartup` once at startup                                                                                                                                           |
+| `apps/web/src/components/chat/chatViewSend.ts`                                | Show the dropped-prompts toast after rewind completes                                                                                                                                                 |
+| `apps/server/src/vcs/VcsProcess.ts`                                           | Part G: retry a checkpoint restore while a worktree index swap holds `index.lock`                                                                                                                     |
+| `packages/contracts/src/orchestrationV2.ts`                                   | Part H: `forkClaudeSessions` and `forkClaudeRecoverOnResume` on the provider thread native metadata                                                                                                   |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                | Part H: same-session fallback, `placeClaudeRollback`, wake clear in `rollbackThread`, resume check in `resumeThread`, orphan error result in `bufferWakeMessage`, resume boundary in the query runner |
+| `apps/server/src/orchestration-v2/ProviderTurnStartService.ts`                | Part H: `withReplacedClaudeSession` on the failed-resume recovery                                                                                                                                     |
+| `apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts` | Part H: the recovery records the replaced session                                                                                                                                                     |
 
 ## Turn off
 
-| Part   | How to turn off                                                                                                                       |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Part A | Remove `claudeTranscriptCursor` calls in `ClaudeAdapterV2.ts` (or drop once upstream merges PR #41126)                                |
-| Part B | Remove `forkEarlierCursorFallback: true` from `CheckpointRollbackService.ts`                                                          |
-| Part C | Restore the three-status check in `RunExecutionService.ts` and `CheckpointCaptureService.ts`                                          |
-| Part D | Remove `Layer.provide(layerForkRollbackFailureClientMessage)` from `runtimeLayer.ts`                                                  |
-| Part E | Remove `notifyForkRollbackDroppedPrompts` from `chatViewSend.ts` and `forkRollbackDroppedPrompts` from `CheckpointRollbackService.ts` |
-| Part F | Remove `backfillFailedRunCheckpointsOnStartup` from `server.ts`                                                                       |
-| Part G | Remove the `restoreCheckpoint` retry branch from `VcsProcess.run` in `VcsProcess.ts`                                                  |
+| Part   | How to turn off                                                                                                                              |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Part A | Remove `claudeTranscriptCursor` calls in `ClaudeAdapterV2.ts` (or drop once upstream merges PR #41126)                                       |
+| Part B | Remove `forkEarlierCursorFallback: true` from `CheckpointRollbackService.ts`                                                                 |
+| Part C | Restore the three-status check in `RunExecutionService.ts` and `CheckpointCaptureService.ts`                                                 |
+| Part D | Remove `Layer.provide(layerForkRollbackFailureClientMessage)` from `runtimeLayer.ts`                                                         |
+| Part E | Remove `notifyForkRollbackDroppedPrompts` from `chatViewSend.ts` and `forkRollbackDroppedPrompts` from `CheckpointRollbackService.ts`        |
+| Part F | Remove `backfillFailedRunCheckpointsOnStartup` from `server.ts`                                                                              |
+| Part G | Remove the `restoreCheckpoint` retry branch from `VcsProcess.run` in `VcsProcess.ts`                                                         |
+| Part H | Remove the Part H `// fork:` hooks in `ClaudeAdapterV2.ts` and `ProviderTurnStartService.ts`, and the `sameSession` argument of the fallback |

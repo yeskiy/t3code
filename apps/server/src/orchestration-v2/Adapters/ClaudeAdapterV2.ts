@@ -26,6 +26,17 @@ import {
 } from "./claudeWorkflowProgress.ts";
 // fork: earlier-cursor rewind fallback.
 import { nearestEarlierClaudeCursor } from "../../fork/rewind/claudeCursorFallback.ts";
+// fork: rewind across recovered Claude sessions
+import {
+  claudeResumeBoundary,
+  claudeSessionOfTurn,
+  isOrphanClaudeErrorResult,
+  needsFreshClaudeSession,
+} from "../../fork/rewind/claudeSessionHistory.ts";
+import {
+  makeClaudeTranscriptLookup,
+  placeClaudeRollback,
+} from "../../fork/rewind/claudeSessionRewind.ts";
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { pastedUrl } from "@t3tools/shared/oauthCallback";
@@ -1812,10 +1823,16 @@ export const layerQueryRunner: Layer.Layer<
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(Path.Path, path),
         );
-        const boundary =
-          resumeSessionAt === undefined
-            ? messages.length
-            : messages.findIndex((message) => message.uuid === resumeSessionAt) + 1;
+        // fork: a resume point the session lacks fails the open instead of resuming from the start.
+        const boundary = claudeResumeBoundary(messages, resumeSessionAt);
+        if (boundary === null) {
+          return yield* queryRunnerError(
+            new ClaudeConversationNotFoundError({
+              cause: `Claude session ${sdkOptions.resume} has no message ${resumeSessionAt}.`,
+            }),
+            "getSessionMessages",
+          );
+        }
         const history = messages.slice(0, boundary);
         endsOnFailedRequest = claudeHistoryEndsOnFailedRequest(history);
         resumeSessionAt = claudeResumeSessionAt(history) ?? resumeSessionAt;
@@ -3343,13 +3360,16 @@ const resolveClaudeRollbackResumeSessionAt = Effect.fn(
         }
       }
 
-      // fork: earlier-cursor fallback, opt-in per call (apps/server/src/fork/rewind/claudeCursorFallback.ts).
+      // fork: same-session earlier-cursor fallback, opt-in per call (apps/server/src/fork/rewind/claudeCursorFallback.ts).
       const forkFallback =
         input.forkEarlierCursorFallback === true
           ? nearestEarlierClaudeCursor({
               targetTurn: target.providerTurn,
               providerThreadTurns: input.providerThreadTurns,
               cursorOf: claudeTurnCursor,
+              sameSession: (turn) =>
+                claudeSessionOfTurn(input.providerThread, turn.ordinal) ===
+                claudeSessionOfTurn(input.providerThread, target.providerTurn.ordinal),
             })
           : null;
       if (forkFallback !== null) {
@@ -3362,6 +3382,10 @@ const resolveClaudeRollbackResumeSessionAt = Effect.fn(
             droppedTurns: forkFallback.droppedTurns as number | undefined,
           }),
         );
+      }
+      // fork: no cursor in the target session, so the next start recovers in a fresh session.
+      if (input.forkEarlierCursorFallback === true) {
+        return { cursor: null, droppedTurns: undefined, forkFreshSession: true as const };
       }
 
       return yield* new ProviderAdapter.ProviderAdapterRollbackThreadError({
@@ -11033,6 +11057,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ));
           const bufferedMessages =
             (yield* Ref.get(wakeBuffers)).get(wakeInput.nativeThreadId)?.messages ?? [];
+          // fork: an error result with nothing buffered before it ends a failed start, not a wake.
+          if (isOrphanClaudeErrorResult(message, bufferedMessages.length)) {
+            return yield* Effect.logInfo("orchestration-v2.claude-orphan-error-result-ignored", {
+              providerSessionId: input.providerSessionId,
+              nativeThreadId: wakeInput.nativeThreadId,
+            });
+          }
           const isNestedSubagentNotification =
             isNotification &&
             !isPendingTaskNotification &&
@@ -15772,6 +15803,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           return found && !unreadable ? ("empty" as const) : ("missing" as const);
         });
+        // fork: transcript reads for rewinds across Claude sessions
+        const forkTranscriptLookup = makeClaudeTranscriptLookup({
+          fileSystem,
+          path,
+          projectsDir: claudeProjectsDir,
+        });
 
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
@@ -15917,6 +15954,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                     driver: CLAUDE_PROVIDER,
                     detail: `Claude session ${nativeThreadId} has no conversation to resume.`,
+                  });
+                }
+                // fork: a rewind without a resumable session, or a resume point the session lacks, recovers.
+                const forkHead = threadInput.providerThread.nativeConversationHeadRef?.nativeId;
+                if (
+                  needsFreshClaudeSession(threadInput.providerThread) ||
+                  (forkHead != null &&
+                    (yield* forkTranscriptLookup.holds(nativeThreadId, forkHead)) === false)
+                ) {
+                  return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: `Claude session ${nativeThreadId} cannot resume at ${forkHead ?? "a rewind point"}.`,
                   });
                 }
                 // A session imported from the terminal has history but no T3
@@ -16482,12 +16531,25 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
 
               const nativeThreadId = yield* getNativeThreadId(rollbackInput.providerThread);
               yield* closeLiveQueryForNativeThread(nativeThreadId);
+              // fork: a wake buffered by the closed process must not outlive the rollback.
+              yield* clearWakeStateForNativeThread(nativeThreadId);
+              yield* resetBackgroundTaskStateForNativeThreadProcess(nativeThreadId, {
+                status: "idle",
+              });
               // The rewound history may no longer hold the turns that carried app notes.
               deliveredAppContext.set(nativeThreadId, new Map());
               const now = yield* DateTime.now;
               // fork: also propagate droppedTurns when the earlier-cursor fallback runs.
               const resolvedRollback = yield* resolveClaudeRollbackResumeSessionAt(rollbackInput);
               const resumeSessionAt = resolvedRollback.cursor;
+              // fork: put the rewind in the Claude session that holds its cursor.
+              const forkPlaced = yield* placeClaudeRollback({
+                rollbackInput,
+                resolved: resolvedRollback,
+                cursorOf: claudeTurnCursor,
+                lookup: forkTranscriptLookup,
+                allocateSessionId: queryRunner.allocateSessionId,
+              });
 
               if (rollbackInput.target.type === "thread_start" && resumeSessionAt === null) {
                 const resetNativeThreadId = yield* queryRunner.allocateSessionId;
@@ -16517,7 +16579,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const { claudeDeliveredAppContext: _delivered, ...nativeMetadata } =
                 rollbackInput.providerThread.nativeMetadata ?? {};
               return {
-                providerThread: {
+                // fork: placed in the session that holds the cursor
+                providerThread: forkPlaced.place({
                   ...rollbackInput.providerThread,
                   ...(rollbackInput.providerThread.nativeMetadata === null
                     ? {}
@@ -16534,13 +16597,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   status: "idle" as const,
                   lastRunOrdinal: rollbackInput.target.appRunOrdinal,
                   updatedAt: now,
-                },
+                }),
                 messages: [],
                 runtimeRequests: [],
                 // fork: report dropped stopped prompts from the earlier-cursor fallback.
-                ...(resolvedRollback.droppedTurns === undefined
+                ...(forkPlaced.droppedTurns === undefined
                   ? {}
-                  : { forkDroppedPrompts: resolvedRollback.droppedTurns }),
+                  : { forkDroppedPrompts: forkPlaced.droppedTurns }),
               };
             },
             (effect, rollbackInput) =>

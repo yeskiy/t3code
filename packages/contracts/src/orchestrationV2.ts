@@ -1249,6 +1249,18 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   ),
   /** MCP app notes already in the Claude session's history: note key to a digest of its text. */
   claudeDeliveredAppContext: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  // fork: older Claude sessions of this row and the turn ordinals each one holds (rewind fixes).
+  forkClaudeSessions: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        sessionId: TrimmedNonEmptyString,
+        firstTurnOrdinal: PositiveInt,
+        lastTurnOrdinal: PositiveInt,
+      }),
+    ),
+  ),
+  // fork: a rewind left no resumable Claude session, so the next resume recovers with a handoff.
+  forkClaudeRecoverOnResume: Schema.optional(Schema.Literal(true)),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;

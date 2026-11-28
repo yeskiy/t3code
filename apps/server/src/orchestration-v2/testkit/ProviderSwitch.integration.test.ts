@@ -2036,6 +2036,10 @@ describe("orchestration v2 provider switching", () => {
           assert.isTrue(turns[2]?.nativeThreadHasTurns);
 
           const projection = yield* orchestrator.getThreadProjection(threadId);
+          // fork: the recovery records the replaced Claude session and the turns it holds.
+          assert.deepEqual(projection.providerThreads[0]?.nativeMetadata?.forkClaudeSessions, [
+            { sessionId: turns[0]!.nativeThreadId!, firstTurnOrdinal: 1, lastTurnOrdinal: 1 },
+          ]);
           const run2 = projection.runs[1]!;
           const handoff = projection.contextHandoffs.find(
             (candidate) => candidate.targetRunId === run2.id,

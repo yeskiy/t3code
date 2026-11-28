@@ -30,4 +30,17 @@ describe("nearestEarlierClaudeCursor", () => {
       nearestEarlierClaudeCursor({ targetTurn: turns[1]!, providerThreadTurns: turns, cursorOf }),
     ).toEqual({ cursor: "a1", droppedTurns: 1 });
   });
+
+  it("never crosses a Claude session boundary", () => {
+    const turns = [turn(1, "a1"), turn(2, "a2"), turn(3, null), turn(4, "b4")];
+    const sessionOf = (entry: { readonly ordinal: number }) => (entry.ordinal <= 2 ? "A" : "B");
+    expect(
+      nearestEarlierClaudeCursor({
+        targetTurn: turns[2]!,
+        providerThreadTurns: turns,
+        cursorOf,
+        sameSession: (entry) => sessionOf(entry) === sessionOf(turns[2]!),
+      }),
+    ).toBeNull();
+  });
 });

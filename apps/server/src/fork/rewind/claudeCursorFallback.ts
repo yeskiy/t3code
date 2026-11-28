@@ -10,12 +10,14 @@ export const nearestEarlierClaudeCursor = <
   readonly targetTurn: T;
   readonly providerThreadTurns: ReadonlyArray<T>;
   readonly cursorOf: (turn: T) => string | null;
+  readonly sameSession?: (turn: T) => boolean;
 }): EarlierClaudeCursorMatch | null => {
   const earlier = input.providerThreadTurns
     .filter(
       (turn) =>
         turn.providerThreadId === input.targetTurn.providerThreadId &&
-        turn.ordinal < input.targetTurn.ordinal,
+        turn.ordinal < input.targetTurn.ordinal &&
+        (input.sameSession?.(turn) ?? true),
     )
     .toSorted((left, right) => right.ordinal - left.ordinal);
   const foundIndex = earlier.findIndex((turn) => input.cursorOf(turn) !== null);

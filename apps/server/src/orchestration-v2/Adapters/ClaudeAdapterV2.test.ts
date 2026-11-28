@@ -42,6 +42,7 @@ import {
   type OrchestrationV2AppThread,
   type OrchestrationV2PendingBackgroundTask,
   OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
   OrchestrationV2ProviderTurnTokenUsage,
   ProjectId,
   ProviderInstanceId,
@@ -86,6 +87,11 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
 import * as PortScanner from "../../preview/PortScanner.ts";
+// fork: rewind across recovered Claude sessions
+import {
+  needsFreshClaudeSession,
+  withReplacedClaudeSession,
+} from "../../fork/rewind/claudeSessionHistory.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { WorkflowAgentTranscriptReadObserver } from "../workflowAgentTranscript.ts";
 import * as ServerConfig from "../../config.ts";
@@ -12198,6 +12204,313 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     ),
   );
+
+  // fork: rewind across recovered Claude sessions (apps/server/src/fork/rewind/claudeSessionHistory.ts).
+  describe("fork: rewind across recovered Claude sessions", () => {
+    const SESSION_A = "702769fb-0000-4000-8000-00000000000a";
+    const SESSION_B = "45087b23-0000-4000-8000-00000000000b";
+    const SESSION_C = "92b17f06-0000-4000-8000-00000000000c";
+    const CURSOR_RUN_35 = "77154793-0000-4000-8000-000000000030";
+    const CURSOR_RUN_39 = "86f1bd78-0000-4000-8000-000000000032";
+    const forkLayer = Layer.mergeAll(
+      IdAllocator.layer,
+      McpProviderSessions.layer,
+      NodeServices.layer,
+      NodeCrypto.layer,
+    );
+
+    // Serein: A holds runs 1-35 (turn 30 is run 35), B is empty, C holds run 39 (turn 32).
+    const makeSereinHarness = Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const configDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-serein-" });
+      const projectDir = NodePath.join(configDir, "projects", "-workspace");
+      yield* fileSystem.makeDirectory(projectDir, { recursive: true });
+      const line = (type: string, uuid: string, sessionId: string) =>
+        JSON.stringify({ type, uuid, sessionId, message: { role: type, content: "x" } });
+      yield* fileSystem.writeFileString(
+        NodePath.join(projectDir, `${SESSION_A}.jsonl`),
+        [
+          line("user", "a-prompt-35", SESSION_A),
+          line("assistant", CURSOR_RUN_35, SESSION_A),
+          "",
+        ].join("\n"),
+      );
+      yield* fileSystem.writeFileString(
+        NodePath.join(projectDir, `${SESSION_B}.jsonl`),
+        `{"type":"last-prompt","lastPrompt":"summary","sessionId":"${SESSION_B}"}\n`,
+      );
+      yield* fileSystem.writeFileString(
+        NodePath.join(projectDir, `${SESSION_C}.jsonl`),
+        [
+          line("user", "c-prompt-39", SESSION_C),
+          line("assistant", CURSOR_RUN_39, SESSION_C),
+          "",
+        ].join("\n"),
+      );
+      const freshCount = yield* Ref.make(0);
+      const harness = yield* makeWakeHarnessWithOptions({
+        close: (sdkMessages) => Queue.shutdown(sdkMessages),
+        freshQueueOnReopen: true,
+        environment: { CLAUDE_CONFIG_DIR: configDir },
+        allocateSessionId: Ref.updateAndGet(freshCount, (count) => count + 1).pipe(
+          Effect.map((count) => `fresh-session-${count}`),
+        ),
+      });
+      const now = yield* DateTime.now;
+      const providerTurn = (ordinal: number, nativeId: string): OrchestrationV2ProviderTurn => ({
+        id: ProviderTurnId.make(`provider-turn-serein-${ordinal}`),
+        providerThreadId: harness.providerThread.id,
+        nodeId: NodeId.make(`node-serein-${ordinal}`),
+        runAttemptId: null,
+        nativeTurnRef: { driver: ClaudeAdapterV2.CLAUDE_PROVIDER, nativeId, strength: "weak" },
+        ordinal,
+        status: "completed",
+        startedAt: now,
+        completedAt: now,
+      });
+      const turns = [
+        providerTurn(29, "a-prompt-35"),
+        providerTurn(30, CURSOR_RUN_35),
+        providerTurn(31, "turn:run-attempt:serein:ordinal:38"),
+        providerTurn(32, CURSOR_RUN_39),
+      ];
+      const atSession = (
+        nativeId: string,
+        nativeMetadata: OrchestrationV2ProviderThread["nativeMetadata"] = null,
+      ): OrchestrationV2ProviderThread => ({
+        ...harness.providerThread,
+        nativeThreadRef: { driver: ClaudeAdapterV2.CLAUDE_PROVIDER, nativeId, strength: "strong" },
+        nativeMetadata,
+      });
+      // The harness opened fresh-session-1. The two recoveries record their sessions as ProviderTurnStartService does.
+      const recovered = withReplacedClaudeSession({
+        previous: withReplacedClaudeSession({
+          previous: atSession(SESSION_A),
+          replacement: atSession(SESSION_B),
+          providerTurns: turns.slice(0, 2),
+        }),
+        replacement: atSession(SESSION_C),
+        providerTurns: turns.slice(0, 3),
+      });
+      const rollbackTo = (
+        providerThread: OrchestrationV2ProviderThread,
+        target: OrchestrationV2ProviderTurn,
+        appRunOrdinal: number,
+      ) =>
+        harness.runtime.rollbackThread({
+          providerThread,
+          target: {
+            type: "provider_turn",
+            checkpointId: CheckpointId.make(`checkpoint-serein-${appRunOrdinal}`),
+            appRunOrdinal,
+            providerTurn: target,
+            message: { role: "user", text: `Run ${appRunOrdinal}`, attachments: [] },
+          },
+          providerThreadTurns: turns,
+          forkEarlierCursorFallback: true,
+        });
+      const startOn = (providerThread: OrchestrationV2ProviderThread, label: string) =>
+        harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-serein-${label}`),
+            text: "Continue.",
+            attachments: [],
+            providerTurnOrdinal: 33,
+            nativeThreadHasTurns: providerThread.nativeConversationHeadRef !== null,
+          }),
+        );
+      return { harness, turns, atSession, recovered, rollbackTo, startOn };
+    });
+
+    it.effect("rolls back to the end of a recovered run in a fresh session with a handoff", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const serein = yield* makeSereinHarness;
+          const rolledBack = yield* serein.rollbackTo(serein.recovered, serein.turns[2]!, 38);
+          assert.equal(rolledBack.providerThread.nativeThreadRef?.nativeId, "fresh-session-2");
+          assert.isNull(rolledBack.providerThread.nativeConversationHeadRef);
+          assert.isTrue(needsFreshClaudeSession(rolledBack.providerThread));
+          assert.isUndefined(rolledBack.forkDroppedPrompts);
+
+          // The resume fails, so the start path recovers in a fresh session with a summary handoff.
+          const resumeError = yield* Effect.flip(
+            serein.harness.runtime.resumeThread({ providerThread: rolledBack.providerThread }),
+          );
+          assert.equal(resumeError._tag, "ProviderAdapterResumeThreadError");
+          const replacement = withReplacedClaudeSession({
+            previous: rolledBack.providerThread,
+            replacement: yield* serein.harness.runtime.ensureThread({
+              threadId: serein.harness.threadId,
+              modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+              runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+            }),
+            providerTurns: serein.turns,
+          });
+          assert.isFalse(needsFreshClaudeSession(replacement));
+          yield* serein.startOn(replacement, "after-run-38");
+          const opened = serein.harness.getOpenedOptions();
+          assert.equal(opened?.sessionId, "fresh-session-3");
+          assert.isUndefined(opened?.resume);
+          assert.isUndefined(opened?.resumeSessionAt);
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("rolls back to run 35 in the older session that holds its message", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const serein = yield* makeSereinHarness;
+          const rolledBack = yield* serein.rollbackTo(serein.recovered, serein.turns[1]!, 35);
+          assert.equal(rolledBack.providerThread.nativeThreadRef?.nativeId, SESSION_A);
+          assert.equal(
+            rolledBack.providerThread.nativeConversationHeadRef?.nativeId,
+            CURSOR_RUN_35,
+          );
+          assert.deepEqual(rolledBack.providerThread.nativeMetadata?.forkClaudeSessions, []);
+          const resumed = yield* serein.harness.runtime.resumeThread({
+            providerThread: rolledBack.providerThread,
+          });
+          yield* serein.startOn(resumed, "after-run-35");
+          const opened = serein.harness.getOpenedOptions();
+          assert.equal(opened?.resume, SESSION_A);
+          assert.equal(opened?.resumeSessionAt, CURSOR_RUN_35);
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("keeps the current session for a target cursor that it holds", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const serein = yield* makeSereinHarness;
+          const rolledBack = yield* serein.rollbackTo(serein.recovered, serein.turns[3]!, 39);
+          assert.equal(rolledBack.providerThread.nativeThreadRef?.nativeId, SESSION_C);
+          assert.equal(
+            rolledBack.providerThread.nativeConversationHeadRef?.nativeId,
+            CURSOR_RUN_39,
+          );
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("reads the session files of a thread that recovered before the session list", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const serein = yield* makeSereinHarness;
+          const legacy = serein.atSession(SESSION_C);
+          const toRun35 = yield* serein.rollbackTo(legacy, serein.turns[1]!, 35);
+          assert.equal(toRun35.providerThread.nativeThreadRef?.nativeId, SESSION_A);
+          assert.equal(toRun35.providerThread.nativeConversationHeadRef?.nativeId, CURSOR_RUN_35);
+          const toRun38 = yield* serein.rollbackTo(legacy, serein.turns[2]!, 38);
+          assert.isTrue(needsFreshClaudeSession(toRun38.providerThread));
+          assert.isNull(toRun38.providerThread.nativeConversationHeadRef);
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("fails the resume when the session transcript lacks the resume point", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const serein = yield* makeSereinHarness;
+          const pinned = (nativeId: string): OrchestrationV2ProviderThread => ({
+            ...serein.atSession(SESSION_C),
+            nativeConversationHeadRef: {
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeId,
+              strength: "weak",
+            },
+          });
+          const error = yield* Effect.flip(
+            serein.harness.runtime.resumeThread({ providerThread: pinned(CURSOR_RUN_35) }),
+          );
+          assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+          assert.include(JSON.stringify(error.cause), CURSOR_RUN_35);
+          yield* serein.harness.runtime.resumeThread({ providerThread: pinned(CURSOR_RUN_39) });
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("clears a buffered wake when a rollback closes the session", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarnessWithOptions({
+            close: (sdkMessages) => Queue.shutdown(sdkMessages),
+            freshQueueOnReopen: true,
+          });
+          const now = yield* DateTime.now;
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-rollback-clears-wake"),
+              text: "Start the build.",
+              attachments: [],
+            }),
+          );
+          yield* Queue.offer(harness.sdkMessages, turnOneResult);
+          yield* harness.awaitTerminal(1);
+          yield* harness.offerAndWait(wakeTurnInit);
+          yield* harness.offerAndWait(
+            makeAssistantTextFrame({
+              uuid: "00000000-0000-4000-8000-000000000911",
+              text: "Still working.",
+            }),
+          );
+          yield* harness.awaitContinuation(1);
+          assert.isTrue(yield* harness.hasPendingBackgroundWork);
+
+          yield* harness.runtime.rollbackThread({
+            providerThread: harness.providerThread,
+            target: {
+              type: "thread_start",
+              checkpointId: CheckpointId.make("checkpoint-claude-rollback-clears-wake"),
+              appRunOrdinal: 0,
+            },
+            providerThreadTurns: [],
+            forkEarlierCursorFallback: true,
+          });
+          assert.isFalse(yield* harness.hasPendingBackgroundWork);
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+
+    it.effect("does not take an error result without a turn as a background wake", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const now = yield* DateTime.now;
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-orphan-error-result"),
+              text: "Start the build.",
+              attachments: [],
+            }),
+          );
+          yield* Queue.offer(harness.sdkMessages, turnOneResult);
+          yield* harness.awaitTerminal(1);
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000912",
+              result: "",
+              subtype: "error_during_execution",
+              isError: true,
+              numTurns: 0,
+              errors: ["No message found with message.uuid of: missing"],
+            }),
+          );
+          yield* yieldTicks(20);
+          assert.lengthOf(harness.continuationRequests, 0);
+          assert.isFalse(yield* harness.hasPendingBackgroundWork);
+        }),
+      ).pipe(Effect.provide(forkLayer)),
+    );
+  });
 
   it.effect("never records a subagent uuid for a turn with no main-thread assistant message", () =>
     Effect.gen(function* () {
