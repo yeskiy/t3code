@@ -2,7 +2,12 @@ import * as Schema from "effect/Schema";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 /** Tools that stay available whenever the T3 MCP server is enabled for a provider. */
-export const FORK_MCP_CORE_TOOLS = ["send_to_user", "t3_submit_output", "tool_search"] as const;
+export const FORK_MCP_CORE_TOOLS = [
+  "send_to_user",
+  "t3_submit_output",
+  "tool_call",
+  "tool_search",
+] as const;
 
 export type ForkMcpCoreToolName = (typeof FORK_MCP_CORE_TOOLS)[number];
 

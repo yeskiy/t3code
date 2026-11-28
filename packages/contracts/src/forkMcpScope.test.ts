@@ -57,6 +57,7 @@ describe("forkMcpScope", () => {
     expect(minimal.mode).toBe("minimal");
     expect(isForkMcpToolAllowed(minimal, "send_to_user")).toBe(true);
     expect(isForkMcpToolAllowed(minimal, "t3_submit_output")).toBe(true);
+    expect(isForkMcpToolAllowed(minimal, "tool_call")).toBe(true);
     expect(isForkMcpToolAllowed(minimal, "tool_search")).toBe(true);
     expect(isForkMcpToolAllowed(minimal, "preview_open")).toBe(false);
     expect(isForkMcpToolAllowed(minimal, "request_secret")).toBe(false);
@@ -66,6 +67,7 @@ describe("forkMcpScope", () => {
     expect(off.mode).toBe("off");
     expect(isForkMcpToolAllowed(off, "send_to_user")).toBe(false);
     expect(isForkMcpToolAllowed(off, "t3_submit_output")).toBe(false);
+    expect(isForkMcpToolAllowed(off, "tool_call")).toBe(false);
     expect(isForkMcpToolAllowed(off, "tool_search")).toBe(false);
     expect(isForkMcpToolAllowed(off, "preview_open")).toBe(false);
   });

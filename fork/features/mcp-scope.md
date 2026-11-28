@@ -32,11 +32,12 @@ Why this storage:
 
 ## Core tools and tool groups
 
-When a provider is not set to `Off`, three core tools stay available:
+When a provider is not set to `Off`, four core tools stay available:
 
 - `send_to_user`: delivers mid-turn text verbatim (required on Claude 5.1+ where pre-tool text is summarized).
 - `t3_submit_output`: lets an agent submit structured output when a run declares `outputSchema`.
 - `tool_search`: lets deferring harnesses (such as GitHub Copilot ACP) load enabled tools on demand. Non-deferring clients do not see it.
+- `tool_call`: runs a deferred tool by name for ACP harnesses that freeze their tool list. The scope check still runs on the tool that it calls.
 
 When a provider is set to `Off`, the T3 MCP server is not attached at all and all tools, including core tools, are hidden and rejected.
 
@@ -60,7 +61,7 @@ When a provider is set to `Off`, the T3 MCP server is not attached at all and al
 
 - **Full** (default): all 13 groups and core tools. Existing environment, project, forge, and subagent restrictions still apply.
 - **Standard**: `worktrees`, `preview`, `html`, `devices`, `pullRequests`, `issues`, `secrets`, and core tools. Disables cross-thread orchestration (`delegation`, `threads`), project management (`projects`), `scheduledTasks`, `environments`, and `themes`.
-- **Minimal**: core tools only (`send_to_user`, `t3_submit_output`, `tool_search`).
+- **Minimal**: core tools only (`send_to_user`, `t3_submit_output`, `tool_call`, `tool_search`).
 - **Off**: no T3 MCP server injected into sessions; any existing session sees an empty tool list and every `tools/call` fails.
 
 Toggling individual switches selects **Custom** whenever the enabled groups do not match a preset.

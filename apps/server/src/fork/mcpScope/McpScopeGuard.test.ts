@@ -284,6 +284,7 @@ it.effect("enforces per-provider MCP scopes on tools/list, tools/call, and tool_
                           result?: {
                             tools?: ReadonlyArray<{ name: string }>;
                             structuredContent?: unknown;
+                            isError?: boolean;
                           };
                           error?: { code: number; message: string };
                         },
@@ -344,6 +345,13 @@ it.effect("enforces per-provider MCP scopes on tools/list, tools/call, and tool_
       expect(searchEnabled.result?.structuredContent).toEqual({
         tools: [{ name: "preview_open", description: "Open a browser preview tab." }],
       });
+
+      // tool_call runs an enabled tool and never runs a disabled one.
+      const proxyEnabled = yield* deferredCodex.call("tool_call", { name: "preview_open" });
+      expect(proxyEnabled.result?.structuredContent).toEqual({ ok: true });
+      const proxyDisabled = yield* deferredCodex.call("tool_call", { name: "delegate_task" });
+      expect(proxyDisabled.result?.structuredContent).toBeUndefined();
+      expect(proxyDisabled.result?.isError).toBe(true);
 
       // Live update to Minimal hides preview and secrets immediately on the existing session.
       yield* settingsService.updateSettings({
